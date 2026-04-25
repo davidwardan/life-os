@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Life OS</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="kicker">Life OS</p>
+          <h1>Daily log</h1>
+        </div>
+        <div class="status" id="status">Local</div>
+      </header>
+
+      <section class="composer" aria-label="Daily log composer">
+        <label for="message">Log entry</label>
+        <textarea
+          id="message"
+          rows="7"
+          spellcheck="true"
+          placeholder="Ate oatmeal and chicken rice. Trained upper body for 45 min. Energy 7, stress 4. Worked 2h on global LSTM paper."
+        ></textarea>
+        <div class="actions">
+          <input id="entryDate" type="date" aria-label="Entry date" />
+          <button id="submit" type="button">Log entry</button>
+        </div>
+      </section>
+
+      <section class="split">
+        <article class="panel">
+          <div class="section-head">
+            <h2>Extracted</h2>
+            <button id="refresh" type="button" class="ghost">Refresh</button>
+          </div>
+          <div id="parsed" class="empty">No entry logged yet.</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <h2>Recent records</h2>
+          </div>
+          <div id="records" class="record-stack"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/static/main.js"></script>
+  </body>
+</html>
+
