@@ -83,6 +83,7 @@ Non-secret defaults in `render.yaml`:
 ```text
 LIFE_OS_TIMEZONE=America/Toronto
 LIFE_OS_WEB_USERNAME=life-os
+LIFE_OS_REQUIRE_WEB_AUTH=true
 LIFE_OS_EXTRACTOR=auto
 LIFE_OS_LLM_TIMEOUT_SECONDS=60
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
@@ -94,7 +95,7 @@ TURSO_SYNC_INTERVAL_SECONDS=60
 
 The replica path can live in `/tmp` because Turso is the durable source of truth.
 
-`LIFE_OS_WEB_PASSWORD` protects the public Render URL with browser Basic Auth. `/health` stays open for Render health checks. `/api/telegram/webhook` also stays open to Telegram, but it is still checked against `TELEGRAM_WEBHOOK_SECRET`.
+`LIFE_OS_WEB_PASSWORD` protects the public Render URL with browser Basic Auth. `LIFE_OS_REQUIRE_WEB_AUTH=true` makes the app fail closed if the password is missing, so the dashboard does not become public by accident. `/health` stays open for Render health checks. `/api/telegram/webhook` also stays open to Telegram, but it is still checked against `TELEGRAM_WEBHOOK_SECRET`.
 
 ## 4. Register The Telegram Webhook
 

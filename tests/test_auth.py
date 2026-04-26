@@ -11,13 +11,16 @@ class WebAuthTests(TestCase):
     def setUp(self) -> None:
         self.original_username = settings.web_username
         self.original_password = settings.web_password
+        self.original_require_web_auth = settings.require_web_auth
         settings.web_username = "life-os"
         settings.web_password = "correct-password"
+        settings.require_web_auth = True
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
         settings.web_username = self.original_username
         settings.web_password = self.original_password
+        settings.require_web_auth = self.original_require_web_auth
 
     def test_blocks_dashboard_without_credentials(self) -> None:
         response = self.client.get("/")
@@ -45,8 +48,17 @@ class WebAuthTests(TestCase):
 
         self.assertNotEqual(response.status_code, 401)
 
-    def test_auth_is_disabled_when_password_is_missing(self) -> None:
+    def test_fails_closed_when_auth_required_but_password_is_missing(self) -> None:
         settings.web_password = None
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("LIFE_OS_WEB_PASSWORD", response.text)
+
+    def test_auth_can_be_disabled_locally_when_password_is_missing(self) -> None:
+        settings.web_password = None
+        settings.require_web_auth = False
 
         response = self.client.get("/")
 

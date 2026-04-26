@@ -13,6 +13,8 @@ services:
         value: America/Toronto
       - key: LIFE_OS_WEB_USERNAME
         value: life-os
+      - key: LIFE_OS_REQUIRE_WEB_AUTH
+        value: "true"
       - key: LIFE_OS_EXTRACTOR
         value: auto
       - key: LIFE_OS_LLM_TIMEOUT_SECONDS

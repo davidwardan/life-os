@@ -20,7 +20,13 @@ async def require_web_auth(
     request: Request,
     call_next: Callable[[Request], Awaitable[Response]],
 ) -> Response:
-    if _is_exempt(request.url.path) or _is_authorized(request.headers.get("authorization")):
+    if _is_exempt(request.url.path):
+        return await call_next(request)
+
+    if web_auth_required() and not settings.web_password:
+        return Response("LIFE_OS_WEB_PASSWORD is not configured", status_code=503)
+
+    if _is_authorized(request.headers.get("authorization")):
         return await call_next(request)
 
     return Response(
@@ -34,8 +40,12 @@ def web_auth_enabled() -> bool:
     return bool(settings.web_password)
 
 
+def web_auth_required() -> bool:
+    return settings.require_web_auth or web_auth_enabled()
+
+
 def _is_exempt(path: str) -> bool:
-    return not web_auth_enabled() or path in _AUTH_EXEMPT_PATHS
+    return not web_auth_required() or path in _AUTH_EXEMPT_PATHS
 
 
 def _is_authorized(header: str | None) -> bool:
