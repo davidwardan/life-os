@@ -113,6 +113,16 @@ https://your-life-os.onrender.com/api/plots/supported
 https://your-life-os.onrender.com/api/briefing
 ```
 
+To inspect memory or detailed briefing features, include your cron secret:
+
+```bash
+curl -H "X-Life-Os-Cron-Secret: your-briefing-secret" \
+  "https://your-life-os.onrender.com/api/memory"
+
+curl -H "X-Life-Os-Cron-Secret: your-briefing-secret" \
+  "https://your-life-os.onrender.com/api/briefing?include_features=true"
+```
+
 Then send a Telegram message:
 
 ```text

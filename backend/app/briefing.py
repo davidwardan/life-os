@@ -12,6 +12,7 @@ import httpx
 
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
+from backend.app.memory import MemoryService
 
 
 BRIEFING_SYSTEM_PROMPT = """
@@ -21,6 +22,8 @@ Use only the provided analytics features. Do not invent data.
 Tone: direct, practical, calm, slightly candid. Avoid therapy language and hype.
 The features are aggregates over windows. Do not describe weekly totals or same-day grouped totals as a single session.
 If a value looks odd because of duplicate or sparse logs, say the data looks noisy or thin.
+If data_warnings is non-empty, use those warnings instead of treating suspicious values literally.
+Use personal_memory to adapt the advice and style when relevant. Do not overfit to one weak memory item.
 Return a short briefing with:
 - Today
 - Push
@@ -108,9 +111,15 @@ class OpenRouterBriefingClient:
 
 
 class BriefingService:
-    def __init__(self, db: LifeDatabase, client: BriefingClient | None = None):
+    def __init__(
+        self,
+        db: LifeDatabase,
+        client: BriefingClient | None = None,
+        memory_service: MemoryService | None = None,
+    ):
         self.db = db
         self.client = client
+        self.memory_service = memory_service or MemoryService(db)
 
     async def generate(self, target_date: date | None = None) -> Briefing:
         briefing_date = target_date or _today()
@@ -142,6 +151,8 @@ class BriefingService:
             "career": self._career(target_date),
             "journal": self._journal(target_date),
             "data_completeness": self._data_completeness(target_date),
+            "personal_memory": self.memory_service.briefing_context(),
+            "data_warnings": self._data_warnings(target_date),
         }
 
     def _wellbeing(self, target_date: date) -> dict[str, Any]:
@@ -192,7 +203,7 @@ class BriefingService:
             "sessions_7d": sum(row["sessions"] or 0 for row in rows),
             "duration_min_7d": _sum(row["duration_min"] for row in rows),
             "intensity_7d_avg": _avg(row["intensity"] for row in rows),
-            "last_session": rows[-1] if rows else None,
+            "last_training_day": rows[-1] if rows else None,
             "top_exercises_7d": exercises,
         }
 
@@ -290,6 +301,27 @@ class BriefingService:
             result[key] = rows[0]["days"] if rows else 0
         return result
 
+    def _data_warnings(self, target_date: date) -> list[str]:
+        warnings = []
+        noisy_training = self._rows(
+            """
+            SELECT date, COUNT(*) AS sessions, SUM(duration_min) AS duration_min
+            FROM workout_logs
+            WHERE date BETWEEN ? AND ?
+            GROUP BY date
+            HAVING COUNT(*) > 3 OR SUM(duration_min) > 240
+            ORDER BY date
+            """,
+            (_start(target_date, 7), target_date.isoformat()),
+        )
+        for row in noisy_training:
+            warnings.append(
+                "Training logs look noisy on "
+                f"{row['date']}: {row['sessions']} workout rows and {row['duration_min']} total minutes. "
+                "Treat this as duplicated or aggregate data, not one literal session."
+            )
+        return warnings
+
     def _rows(self, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
         with self.db.connect() as connection:
             cursor = connection.execute(query, params)
@@ -324,6 +356,7 @@ def _deterministic_briefing(target_date: date, features: dict[str, Any]) -> str:
     nutrition = features["nutrition"]
     career = features["career"]
     completeness = features["data_completeness"]
+    memory = features.get("personal_memory", {})
 
     sleep = wellbeing["sleep_7d_avg"]
     energy = wellbeing["energy_7d_avg"]
@@ -333,9 +366,9 @@ def _deterministic_briefing(target_date: date, features: dict[str, Any]) -> str:
     protein = nutrition["protein_7d_avg"]
 
     today = _today_line(sleep, energy, stress, training_days)
-    push = _push_line(energy, stress, deep_work, career["top_projects_7d"])
-    chill = _chill_line(sleep, stress, training_days)
-    watch = _watch_line(protein, completeness)
+    push = _push_line(energy, stress, deep_work, career["top_projects_7d"], memory)
+    chill = _chill_line(sleep, stress, training_days, memory)
+    watch = _watch_line(protein, completeness, memory)
 
     return "\n".join(
         [
@@ -365,34 +398,66 @@ def _push_line(
     stress: float | None,
     deep_work: float | None,
     projects: list[dict[str, Any]],
+    memory: dict[str, list[dict[str, Any]]],
 ) -> str:
     project = projects[0]["project"] if projects else "your highest-value project"
+    strategy = _memory_value(memory, "strategy")
     if deep_work is None or deep_work < 5:
         return f"Prioritize 60-90 minutes on {project}; career hours are light this week."
+    if strategy:
+        return f"Use what tends to work for you: {strategy}. Apply it to {project}."
     if energy is not None and energy >= 7 and (stress is None or stress <= 6):
         return f"Take a bigger swing on {project}; the recent trend supports it."
     return f"Move {project} forward with one clean, bounded work block."
 
 
-def _chill_line(sleep: float | None, stress: float | None, training_days: int) -> str:
+def _chill_line(
+    sleep: float | None,
+    stress: float | None,
+    training_days: int,
+    memory: dict[str, list[dict[str, Any]]],
+) -> str:
+    anti_strategy = _memory_value(memory, "anti_strategy")
+    aversion = _memory_value(memory, "aversion")
     if training_days >= 5:
         return "Avoid stacking another hard session unless recovery feels clearly good."
     if stress is not None and stress >= 7:
         return "Keep meetings, admin, and training intensity contained."
     if sleep is not None and sleep < 6.5:
         return "Cut optional friction and do the basics well."
+    if anti_strategy:
+        return f"Do not lean on what you said does not help: {anti_strategy}."
+    if aversion:
+        return f"Avoid adding friction around {aversion}."
     return "No need for a full deload; just do not turn every task into a test."
 
 
-def _watch_line(protein: float | None, completeness: dict[str, Any]) -> str:
+def _watch_line(
+    protein: float | None,
+    completeness: dict[str, Any],
+    memory: dict[str, list[dict[str, Any]]],
+) -> str:
     weak_logs = [name.removesuffix("_days") for name, count in completeness.items() if count < 3]
+    reminder = _memory_value(memory, "reminder")
+    goal = _memory_value(memory, "goal")
     if protein is None:
         return "Protein data is too sparse for advice; log portions if nutrition matters today."
     if protein < 100:
         return "Protein is trending low; make the first two meals easier to quantify."
+    if reminder:
+        return f"Remember: {reminder}."
+    if goal:
+        return f"Keep the broader goal visible: {goal}."
     if weak_logs:
         return f"Data is thin for {', '.join(weak_logs[:2])}; one quick log tonight will help tomorrow."
     return "The data is usable. Keep logging short but specific."
+
+
+def _memory_value(memory: dict[str, list[dict[str, Any]]], category: str) -> str | None:
+    items = memory.get(category) or []
+    if not items:
+        return None
+    return str(items[0]["value"])
 
 
 def _configured_briefing_client() -> OpenRouterBriefingClient | None:

@@ -280,3 +280,29 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(result.briefing_method, "deterministic")
             self.assertIn("Morning brief", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_memory_request_updates_memory_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "remember that briefings should be direct and concise",
+                    }
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "memory_updated")
+            self.assertIn("Memory updated", client.sent[0][1])
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)

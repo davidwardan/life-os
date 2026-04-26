@@ -9,6 +9,7 @@ from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
+from backend.app.memory import MemoryService
 from backend.app.plotting import PlotRequest, PlotService, supported_plots
 from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn, TelegramStatus
 from backend.app.telegram import make_telegram_service, verify_telegram_secret
@@ -19,7 +20,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 db = LifeDatabase()
 extractor = ExtractionService()
 plotter = PlotService(db)
-briefing_service = BriefingService(db)
+memory_service = MemoryService(db)
+briefing_service = BriefingService(db, memory_service=memory_service)
 telegram_service = make_telegram_service(db, extractor)
 
 
@@ -56,6 +58,7 @@ def telegram_status() -> TelegramStatus:
 async def create_message(message: MessageIn) -> LoggedMessage:
     parsed, method, error = await extractor.extract(message.text, message.entry_date)
     saved = db.save_message(message, parsed)
+    memory_service.learn_from_message(message.text, parsed, saved["raw_message_id"])
     return LoggedMessage(
         raw_message_id=saved["raw_message_id"],
         parsed=parsed,
@@ -83,15 +86,44 @@ def list_supported_plots() -> dict[str, object]:
 
 
 @app.get("/api/briefing")
-async def create_briefing() -> dict[str, object]:
+async def create_briefing(
+    include_features: bool = False,
+    x_life_os_cron_secret: str | None = Header(default=None),
+) -> dict[str, object]:
     briefing = await briefing_service.generate()
-    return {
+    response: dict[str, object] = {
         "date": briefing.date.isoformat(),
         "text": briefing.text,
-        "features": briefing.features,
         "method": briefing.method,
         "error": briefing.error,
     }
+    if include_features:
+        if settings.briefing_cron_secret and x_life_os_cron_secret != settings.briefing_cron_secret:
+            raise HTTPException(status_code=403, detail="Invalid briefing feature access secret")
+        response["features"] = briefing.features
+    return response
+
+
+@app.get("/api/memory")
+def list_memory(
+    category: str | None = None,
+    query: str | None = None,
+    limit: int = 25,
+    x_life_os_cron_secret: str | None = Header(default=None),
+) -> dict[str, object]:
+    if settings.briefing_cron_secret and x_life_os_cron_secret != settings.briefing_cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid memory access secret")
+    return {"memory": memory_service.list_items(category=category, query=query, limit=limit)}
+
+
+@app.post("/api/memory/backfill")
+def backfill_memory(
+    x_life_os_cron_secret: str | None = Header(default=None),
+    limit: int = 200,
+) -> dict[str, int]:
+    if settings.briefing_cron_secret and x_life_os_cron_secret != settings.briefing_cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid memory backfill secret")
+    return memory_service.backfill_from_raw_messages(limit)
 
 
 @app.post("/api/briefing/send")

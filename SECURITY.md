@@ -15,6 +15,7 @@ Never commit:
 - SQLite databases
 - Generated local plots from real data
 - Turso database tokens
+- personal memory exports
 
 The repository ignores `.env`, `.env.*`, `data/`, `*.sqlite`, and `*.sqlite3`.
 
@@ -34,6 +35,7 @@ Cloud deployment is convenient, but it is less private than a local-only setup. 
 - Use Turso only with a scoped database token.
 - Keep `TELEGRAM_ALLOWED_USER_IDS` enabled.
 - Keep `BRIEFING_CRON_SECRET` set before exposing scheduled briefing endpoints.
+- Treat memory items as sensitive. They can reveal preferences, personality, goals, and frustrations.
 - Remember that generated Telegram replies and chart images pass through Telegram infrastructure.
 - Avoid logging sensitive request bodies in third-party dashboards.
 

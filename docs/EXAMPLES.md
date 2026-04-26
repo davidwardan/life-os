@@ -106,3 +106,24 @@ The chart style is intentionally restrained:
 - large titles and sparse grid lines
 
 The goal is to make personal data feel calm, legible, and useful rather than dashboard-heavy.
+
+## Personal Memory
+
+Explicit memory commands are not stored as daily logs. They update durable preferences:
+
+```text
+remember that briefings should be direct and concise
+remember that training early works for me
+remember that I don't like vague motivational advice
+```
+
+Life OS stores these as structured memory:
+
+```text
+memory_items
+- briefing_style: direct and concise
+- strategy: training early
+- aversion: vague motivational advice
+```
+
+Morning briefings receive both analytics and relevant memory. The model can adapt tone and recommendations without receiving arbitrary database access.

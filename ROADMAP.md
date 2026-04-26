@@ -83,12 +83,20 @@ Next:
 
 ## Phase 6: Search And Memory
 
-Status: planned.
+Status: active.
+
+- Personal memory table
+- Telegram memory updates
+- Briefing retrieval over personal memory
+- Memory references linked back to source messages when learned from logs
+
+Next:
 
 - Journal search
 - Optional local vector index
 - Semantic retrieval over long reflections
-- Memory references linked back to source messages
+- Memory correction and deletion flow
+- LLM-assisted memory extraction with strict validation
 
 ## Phase 7: Optional Gateways
 

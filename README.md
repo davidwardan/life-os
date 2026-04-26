@@ -39,6 +39,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Local SQLite source of truth
 - Raw message archive for every logged note
 - Structured logs for wellbeing, nutrition, workouts, exercises, career, and journal entries
+- Long-term memory for explicit preferences, strategies, goals, and briefing style
 - OpenRouter-backed LLM extraction with deterministic fallback
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
@@ -57,7 +58,9 @@ flowchart TD
     D --> E["SQLite source of truth"]
     E --> F["Plot service"]
     E --> G["Morning briefing service"]
+    E --> I["Personal memory"]
     F --> H["Telegram chart replies"]
+    I --> G
 ```
 
 The database is the product core. Agents, chat channels, and dashboards sit on top of it.
@@ -126,6 +129,14 @@ morning brief
 /brief
 ```
 
+Teach the assistant durable preferences:
+
+```text
+remember that briefings should be direct and concise
+remember that training early works for me
+remember that I don't like vague motivational advice
+```
+
 ## Data Model
 
 Every inbound message becomes one raw record plus zero or more structured records:
@@ -138,9 +149,10 @@ workout_logs
 workout_exercises
 career_logs
 journal_entries
+memory_items
 ```
 
-Structured rows point back to `source_message_id`, so every chart and future briefing can be traced to the original note.
+Structured rows point back to `source_message_id`, so every chart and future briefing can be traced to the original note. Memory items keep evidence and confidence so personal context can be corrected later.
 
 ## Documentation
 
@@ -152,4 +164,4 @@ Structured rows point back to `source_message_id`, so every chart and future bri
 
 ## Project Direction
 
-The MVP is now centered on logging, extraction, Telegram, plots, and morning briefings. Next phases focus on search, memory, and optional gateway integrations.
+The MVP is now centered on logging, extraction, Telegram, plots, morning briefings, and personal memory. Next phases focus on stronger search, correction workflows, and optional gateway integrations.

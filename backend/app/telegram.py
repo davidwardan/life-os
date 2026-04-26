@@ -12,6 +12,7 @@ from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
+from backend.app.memory import MemoryService, is_memory_request
 from backend.app.plotting import PlotRequest, PlotService, parse_plot_requests
 from backend.app.schemas import MessageIn
 
@@ -72,6 +73,7 @@ class TelegramService:
         extractor: ExtractionService,
         plotter: PlotService | None = None,
         briefing_service: BriefingService | None = None,
+        memory_service: MemoryService | None = None,
         client: TelegramClient | None = None,
         allowed_user_ids: frozenset[int] = settings.telegram_allowed_user_ids,
         send_confirmations: bool = settings.telegram_send_confirmations,
@@ -79,7 +81,8 @@ class TelegramService:
         self.db = db
         self.extractor = extractor
         self.plotter = plotter or PlotService(db)
-        self.briefing_service = briefing_service or BriefingService(db)
+        self.memory_service = memory_service or MemoryService(db)
+        self.briefing_service = briefing_service or BriefingService(db, memory_service=self.memory_service)
         self.client = client
         self.allowed_user_ids = allowed_user_ids
         self.send_confirmations = send_confirmations
@@ -111,6 +114,13 @@ class TelegramService:
             if self.client and self.send_confirmations:
                 await self.client.send_message(chat_id, confirmation)
             return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
+
+        if is_memory_request(text):
+            learned = self.memory_service.learn_from_message(text)
+            confirmation = _memory_confirmation(learned)
+            if self.client and self.send_confirmations:
+                await self.client.send_message(chat_id, confirmation)
+            return TelegramResult(ok=True, status="memory_updated", confirmation=confirmation)
 
         if is_briefing_request(text):
             briefing = await self.briefing_service.generate(_telegram_entry_date(message.get("date")))
@@ -150,7 +160,10 @@ class TelegramService:
         entry_date = _telegram_entry_date(message.get("date"))
         parsed, method, error = await self.extractor.extract(text, entry_date)
         saved = self.db.save_message(MessageIn(text=text, entry_date=entry_date, source="telegram"), parsed)
+        learned = self.memory_service.learn_from_message(text, parsed, saved["raw_message_id"])
         confirmation = _confirmation(saved["raw_message_id"], parsed, method, error)
+        if learned:
+            confirmation += f"\nMemory: updated {len(learned)} item(s)."
 
         if self.client and self.send_confirmations:
             await self.client.send_message(chat_id, confirmation)
@@ -171,7 +184,7 @@ def make_telegram_service(db: LifeDatabase, extractor: ExtractionService) -> Tel
         db=db,
         extractor=extractor,
         plotter=PlotService(db),
-        briefing_service=BriefingService(db),
+        memory_service=MemoryService(db),
         client=client,
     )
 
@@ -248,4 +261,13 @@ def _confirmation(raw_message_id: int, parsed, method: str, error: str | None) -
             lines.append(f"- {question}")
     if error:
         lines.append(f"Fallback note: {error}")
+    return "\n".join(lines)
+
+
+def _memory_confirmation(items: list[dict[str, Any]]) -> str:
+    if not items:
+        return "I did not find a durable preference or strategy to remember. Try: remember that briefings should be direct and concise."
+    lines = [f"Memory updated: {len(items)} item(s)."]
+    for item in items[:4]:
+        lines.append(f"- {item['category']}: {item['value']}")
     return "\n".join(lines)

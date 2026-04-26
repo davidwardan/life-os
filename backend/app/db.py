@@ -132,6 +132,29 @@ CREATE TABLE IF NOT EXISTS journal_entries (
     created_at TEXT NOT NULL,
     FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
 );
+
+CREATE TABLE IF NOT EXISTS memory_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    category TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    value TEXT NOT NULL,
+    evidence TEXT,
+    source_message_id INTEGER,
+    confidence REAL NOT NULL DEFAULT 0.7,
+    importance INTEGER NOT NULL DEFAULT 3,
+    times_seen INTEGER NOT NULL DEFAULT 1,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_unique
+ON memory_items(category, subject, value);
+
+CREATE INDEX IF NOT EXISTS idx_memory_items_active_category
+ON memory_items(active, category);
 """
 
 
@@ -179,6 +202,20 @@ MIGRATIONS: dict[str, dict[str, str]] = {
         "source_message_id": "INTEGER",
         "date": "TEXT",
         "entry_date": "TEXT",
+    },
+    "memory_items": {
+        "category": "TEXT",
+        "subject": "TEXT",
+        "value": "TEXT",
+        "evidence": "TEXT",
+        "source_message_id": "INTEGER",
+        "confidence": "REAL NOT NULL DEFAULT 0.7",
+        "importance": "INTEGER NOT NULL DEFAULT 3",
+        "times_seen": "INTEGER NOT NULL DEFAULT 1",
+        "active": "INTEGER NOT NULL DEFAULT 1",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
+        "last_seen_at": "TEXT",
     },
 }
 

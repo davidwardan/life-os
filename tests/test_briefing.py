@@ -5,6 +5,7 @@ from unittest import IsolatedAsyncioTestCase, TestCase
 
 from backend.app.briefing import BriefingService, is_briefing_request
 from backend.app.db import LifeDatabase
+from backend.app.memory import MemoryService
 from backend.app.schemas import (
     CareerEntry,
     ExerciseEntry,
@@ -31,6 +32,21 @@ class BriefingTests(IsolatedAsyncioTestCase):
             self.assertIn("Push:", briefing.text)
             self.assertEqual(briefing.features["training"]["training_days_7d"], 4)
             self.assertGreater(briefing.features["career"]["deep_work_hours_7d"], 0)
+            self.assertIn("last_training_day", briefing.features["training"])
+
+    async def test_briefing_uses_personal_memory(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            _seed_briefing_data(db, date(2026, 4, 25))
+            memory = MemoryService(db)
+            memory.learn_from_message("Training early works for me. I don't like vague motivational advice.")
+            service = BriefingService(db, memory_service=memory)
+
+            briefing = await service.generate(date(2026, 4, 25))
+
+            self.assertIn("personal_memory", briefing.features)
+            self.assertIn("strategy", briefing.features["personal_memory"])
+            self.assertIn("training early", briefing.text)
 
 
 class BriefingRequestTests(TestCase):
