@@ -1,21 +1,22 @@
 # Deployment
 
-This guide deploys Life OS with automatic deploys from `main` while keeping the database persistent on a free SQLite-compatible service.
+This guide deploys Life OS on Render with automatic deploys from `main`, while keeping the database persistent on a free SQLite-compatible service.
 
 ## Recommended Free Stack
 
 Use:
 
-- Koyeb Free Instance for the FastAPI web service.
+- Render Free Web Service for the FastAPI app.
 - Turso Free plan for SQLite-compatible persistence.
 - OpenRouter for extraction.
 - Telegram webhook for chat input.
 
 Why this shape:
 
-- Koyeb can build from GitHub and redeploy automatically whenever `main` changes.
-- Koyeb Free Instances are useful for hobby web services, but their local filesystem is not persistent.
-- Turso gives the app a persistent SQLite-compatible database without changing the data model to Postgres.
+- Render can deploy from GitHub and redeploy automatically whenever `main` changes.
+- Render supports Docker builds from a repo `Dockerfile`.
+- Render free web services have an ephemeral filesystem, so a local SQLite file inside the service is not durable.
+- Turso keeps the current SQLite-style data model but stores the durable database outside the Render container.
 
 ## 1. Create A Turso Database
 
@@ -34,41 +35,55 @@ TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
 
-## 2. Deploy The Web Service On Koyeb
+## 2. Deploy On Render
 
-In Koyeb:
+The repo includes `render.yaml`, so the cleanest path is Render Blueprints:
 
-1. Create a new Web Service.
-2. Select GitHub as the deployment method.
-3. Select `davidwardan/life-os`.
+1. Open Render.
+2. Click **New > Blueprint**.
+3. Connect `davidwardan/life-os`.
 4. Select branch `main`.
-5. Select the Dockerfile builder.
-6. Use the Free Instance.
-7. Expose port `8000`.
-8. Keep autodeploy enabled.
+5. Confirm the `render.yaml` blueprint.
+6. Enter the secret environment variables Render prompts for.
+7. Deploy.
 
-Koyeb will build the repository and run the `Dockerfile`.
+The blueprint creates one free Docker web service:
+
+```text
+name: life-os
+runtime: docker
+plan: free
+branch: main
+autoDeployTrigger: commit
+healthCheckPath: /health
+```
+
+`autoDeployTrigger: commit` means Render deploys again when you push to `main`.
 
 ## 3. Add Environment Variables
 
-Set these in Koyeb. Do not commit real values.
+The blueprint sets non-secret defaults and prompts for secrets with `sync: false`.
+
+Required secrets:
+
+```text
+OPENROUTER_API_KEY=
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_IDS=
+TELEGRAM_WEBHOOK_SECRET=
+TURSO_DATABASE_URL=
+TURSO_AUTH_TOKEN=
+```
+
+Non-secret defaults in `render.yaml`:
 
 ```text
 LIFE_OS_TIMEZONE=America/Toronto
 LIFE_OS_EXTRACTOR=auto
 LIFE_OS_LLM_TIMEOUT_SECONDS=60
-
-OPENROUTER_API_KEY=
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-nano-30b-a3b:free
-
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_ALLOWED_USER_IDS=
-TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_SEND_CONFIRMATIONS=true
-
-TURSO_DATABASE_URL=
-TURSO_AUTH_TOKEN=
 TURSO_REPLICA_PATH=/tmp/life-os-turso-replica.sqlite3
 TURSO_SYNC_INTERVAL_SECONDS=60
 ```
@@ -77,10 +92,10 @@ The replica path can live in `/tmp` because Turso is the durable source of truth
 
 ## 4. Register The Telegram Webhook
 
-After Koyeb deploys, use the public Koyeb URL:
+After Render deploys, use the public Render URL:
 
 ```bash
-python scripts/set_telegram_webhook.py https://your-life-os.koyeb.app
+python scripts/set_telegram_webhook.py https://your-life-os.onrender.com
 ```
 
 The script reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` from your local `.env`.
@@ -90,9 +105,9 @@ The script reads `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` from your lo
 Check:
 
 ```text
-https://your-life-os.koyeb.app/health
-https://your-life-os.koyeb.app/api/telegram/status
-https://your-life-os.koyeb.app/api/plots/supported
+https://your-life-os.onrender.com/health
+https://your-life-os.onrender.com/api/telegram/status
+https://your-life-os.onrender.com/api/plots/supported
 ```
 
 Then send a Telegram message:
@@ -109,7 +124,7 @@ plot my energy
 
 ## Notes
 
-- Free instances can sleep. Telegram requests may have cold-start latency.
+- Render free services spin down when idle, so Telegram requests can have cold-start latency.
 - Keep the Telegram allowlist enabled before exposing the webhook.
-- Treat the cloud deployment as less private than your local machine. This is still sensitive life data.
+- Treat cloud deployment as less private than your local machine. This is sensitive life data.
 - If you want maximum privacy later, move back to a local machine with Tailscale and use the same app.

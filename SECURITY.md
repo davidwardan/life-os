@@ -27,7 +27,7 @@ The repository ignores `.env`, `.env.*`, `data/`, `*.sqlite`, and `*.sqlite3`.
 
 ## Cloud Deployment
 
-Cloud deployment is convenient, but it is less private than a local-only setup. If using Koyeb and Turso:
+Cloud deployment is convenient, but it is less private than a local-only setup. If using Render and Turso:
 
 - Store all secrets in the provider environment settings.
 - Use Turso only with a scoped database token.

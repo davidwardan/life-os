@@ -84,7 +84,7 @@ python -m unittest discover -s tests
 
 ## Deploy
 
-For a free cloud deployment with automatic deploys from `main`, use Koyeb for the FastAPI service and Turso for persistent SQLite-compatible storage. See [Deployment](docs/DEPLOYMENT.md).
+For a free cloud deployment with automatic deploys from `main`, use Render for the FastAPI service and Turso for persistent SQLite-compatible storage. See [Deployment](docs/DEPLOYMENT.md).
 
 ## Configuration
 
