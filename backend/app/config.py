@@ -17,10 +17,15 @@ def _split_csv(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").lower() in {"1", "true", "yes", "on"}
+
+
 class Settings:
     timezone: str = getenv("LIFE_OS_TIMEZONE", "America/Toronto")
     web_username: str = getenv("LIFE_OS_WEB_USERNAME", "life-os")
     web_password: str | None = getenv("LIFE_OS_WEB_PASSWORD")
+    require_web_auth: bool = _truthy(getenv("LIFE_OS_REQUIRE_WEB_AUTH")) or bool(getenv("RENDER"))
     extractor: str = getenv("LIFE_OS_EXTRACTOR", "deterministic").lower()
     openrouter_api_key: str | None = getenv("OPENROUTER_API_KEY")
     openrouter_base_url: str = getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
@@ -39,11 +44,7 @@ class Settings:
         for value in getenv("TELEGRAM_ALLOWED_USER_IDS", "").split(",")
         if value.strip()
     )
-    telegram_send_confirmations: bool = getenv("TELEGRAM_SEND_CONFIRMATIONS", "true").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
+    telegram_send_confirmations: bool = _truthy(getenv("TELEGRAM_SEND_CONFIRMATIONS", "true"))
     turso_database_url: str | None = getenv("TURSO_DATABASE_URL")
     turso_auth_token: str | None = getenv("TURSO_AUTH_TOKEN")
     turso_replica_path: Path = Path(getenv("TURSO_REPLICA_PATH", str(TURSO_REPLICA_PATH)))

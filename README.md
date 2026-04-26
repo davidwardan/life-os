@@ -102,6 +102,7 @@ LIFE_OS_EXTRACTOR=auto
 LIFE_OS_TIMEZONE=America/Toronto
 LIFE_OS_WEB_USERNAME=life-os
 LIFE_OS_WEB_PASSWORD=
+LIFE_OS_REQUIRE_WEB_AUTH=false
 
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
@@ -119,7 +120,7 @@ TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
 
-Set `LIFE_OS_WEB_PASSWORD` in production. When it is present, the dashboard and normal API routes require Basic Auth. `/health` stays open for Render health checks, and `/api/telegram/webhook` stays open to Telegram but remains protected by `TELEGRAM_WEBHOOK_SECRET`.
+Set `LIFE_OS_WEB_PASSWORD` in production. On Render, web auth is required by default; if the password is missing, the dashboard and normal API routes fail closed instead of becoming public. `/health` stays open for Render health checks, and `/api/telegram/webhook` stays open to Telegram but remains protected by `TELEGRAM_WEBHOOK_SECRET`.
 
 For local Telegram testing with ngrok:
 
