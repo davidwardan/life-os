@@ -42,6 +42,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - OpenRouter-backed LLM extraction with deterministic fallback
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
+- Multi-line Telegram plot batches
 - Minimal local web surface served by FastAPI
 - Privacy-focused defaults: ignored `.env`, ignored local data, no arbitrary SQL from the agent
 
@@ -133,4 +134,4 @@ Structured rows point back to `source_message_id`, so every chart and future bri
 
 ## Project Direction
 
-The MVP is now centered on logging, extraction, Telegram, and plots. Next phases focus on better review/edit workflows, richer analytics, semantic journal search, and morning briefings that combine deterministic trend features with agent-written guidance.
+The MVP is now centered on logging, extraction, Telegram, and plots. The next phase is morning briefings that combine deterministic trend features with agent-written guidance.

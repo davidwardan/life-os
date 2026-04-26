@@ -74,6 +74,23 @@ plot protein for the last week
 
 Life OS sends a separate image for each line. Plot requests are not stored as daily logs.
 
+Supported commands include:
+
+```text
+plot my energy
+plot sleep vs energy
+show stress vs workouts
+plot my workouts
+show workout frequency
+plot squat history
+show my career hours
+plot deep work by project
+plot protein for the last week
+show protein consistency
+plot calories
+show habit heatmap
+```
+
 ## Example Plot
 
 ![Energy and stress example](assets/life-os-energy-stress.png)

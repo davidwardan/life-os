@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import os
 from pathlib import Path
+from typing import Any
 
 from backend.app.config import DATA_DIR
 
@@ -15,6 +17,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
 from matplotlib.ticker import MaxNLocator
 
 from backend.app.db import LifeDatabase
@@ -32,6 +35,7 @@ RED = "#d9291c"
 class PlotRequest:
     metric: str
     days: int = 30
+    subject: str | None = None
 
 
 @dataclass(frozen=True)
@@ -44,13 +48,38 @@ class PlotResult:
 SUPPORTED_METRICS = {
     "energy": "Energy and stress",
     "stress": "Energy and stress",
+    "wellbeing": "Energy and stress",
+    "sleep_energy": "Sleep vs energy",
+    "stress_workout": "Stress vs workout load",
     "workout": "Workout duration",
     "workouts": "Workout duration",
+    "workout_frequency": "Workout frequency",
+    "exercise_history": "Exercise history",
     "career": "Career hours",
     "work": "Career hours",
+    "career_projects": "Deep work by project",
     "protein": "Protein",
+    "protein_consistency": "Protein consistency",
     "calories": "Calories",
+    "habits": "Data completeness",
+    "data_completeness": "Data completeness",
 }
+
+
+SUPPORTED_PLOTS = [
+    {"metric": "energy", "title": "Energy and stress", "example": "plot my energy"},
+    {"metric": "sleep_energy", "title": "Sleep vs energy", "example": "plot sleep vs energy"},
+    {"metric": "stress_workout", "title": "Stress vs workout load", "example": "show stress vs workouts"},
+    {"metric": "workout", "title": "Workout duration", "example": "plot my workouts"},
+    {"metric": "workout_frequency", "title": "Workout frequency", "example": "show workout frequency"},
+    {"metric": "exercise_history", "title": "Exercise history", "example": "plot squat history"},
+    {"metric": "career", "title": "Career hours", "example": "show my career hours"},
+    {"metric": "career_projects", "title": "Deep work by project", "example": "plot deep work by project"},
+    {"metric": "protein", "title": "Protein", "example": "plot protein for the last week"},
+    {"metric": "protein_consistency", "title": "Protein consistency", "example": "show protein consistency"},
+    {"metric": "calories", "title": "Calories", "example": "plot calories"},
+    {"metric": "data_completeness", "title": "Data completeness", "example": "show habit heatmap"},
+]
 
 
 def parse_plot_request(text: str) -> PlotRequest | None:
@@ -58,13 +87,30 @@ def parse_plot_request(text: str) -> PlotRequest | None:
     if not any(word in lower for word in ("plot", "chart", "graph", "show")):
         return None
 
-    days = 30
-    if "week" in lower or "7 day" in lower:
-        days = 7
-    elif "90" in lower or "3 month" in lower:
-        days = 90
+    days = _parse_days(lower)
+    subject = _parse_exercise_subject(lower)
+
+    if ("sleep" in lower and "energy" in lower) or "sleep" in lower:
+        return PlotRequest(metric="sleep_energy", days=days)
+    if "stress" in lower and any(word in lower for word in ("workout", "training", "load")):
+        return PlotRequest(metric="stress_workout", days=days)
+    if any(word in lower for word in ("habit", "habits", "heatmap", "completeness", "complete")):
+        return PlotRequest(metric="data_completeness", days=days)
+    if subject or "exercise" in lower:
+        return PlotRequest(metric="exercise_history", days=days, subject=subject)
+    if any(word in lower for word in ("frequency", "count")) and any(
+        word in lower for word in ("workout", "workouts", "training")
+    ):
+        return PlotRequest(metric="workout_frequency", days=days)
+    if any(word in lower for word in ("project", "projects")) and any(
+        word in lower for word in ("career", "work", "deep work", "hours")
+    ):
+        return PlotRequest(metric="career_projects", days=days)
+    if "protein" in lower and any(word in lower for word in ("consistency", "consistent", "target")):
+        return PlotRequest(metric="protein_consistency", days=days)
 
     for keyword, metric in (
+        ("wellbeing", "wellbeing"),
         ("energy", "energy"),
         ("stress", "stress"),
         ("workout", "workout"),
@@ -101,16 +147,30 @@ class PlotService:
 
     def generate(self, request: PlotRequest) -> PlotResult:
         metric = SUPPORTED_METRICS.get(request.metric, "Energy and stress")
-        if request.metric in {"energy", "stress"}:
+        if request.metric in {"energy", "stress", "wellbeing"}:
             return self._energy_stress(request.days)
+        if request.metric == "sleep_energy":
+            return self._sleep_energy(request.days)
+        if request.metric == "stress_workout":
+            return self._stress_workout(request.days)
         if request.metric in {"workout", "workouts"}:
             return self._workout_duration(request.days)
+        if request.metric == "workout_frequency":
+            return self._workout_frequency(request.days)
+        if request.metric == "exercise_history":
+            return self._exercise_history(request.days, request.subject)
         if request.metric in {"career", "work"}:
             return self._career_hours(request.days)
+        if request.metric == "career_projects":
+            return self._career_projects(request.days)
         if request.metric == "protein":
             return self._nutrition_metric("protein_g", "Protein", "g", request.days)
+        if request.metric == "protein_consistency":
+            return self._nutrition_metric("protein_g", "Protein consistency", "g", request.days)
         if request.metric == "calories":
             return self._nutrition_metric("calories", "Calories", "cal", request.days)
+        if request.metric in {"habits", "data_completeness"}:
+            return self._data_completeness(request.days)
         raise ValueError(f"Unsupported metric: {metric}")
 
     def _energy_stress(self, days: int) -> PlotResult:
@@ -142,6 +202,57 @@ class PlotService:
         _save(fig, path)
         return PlotResult(path=path, title="Energy and stress", detail=f"{len(rows)} day(s)")
 
+    def _sleep_energy(self, days: int) -> PlotResult:
+        rows = self._rows(
+            """
+            SELECT date, AVG(sleep_hours) AS sleep_hours, AVG(energy) AS energy
+            FROM daily_checkins
+            WHERE date >= ? AND (sleep_hours IS NOT NULL OR energy IS NOT NULL)
+            GROUP BY date
+            ORDER BY date
+            """,
+            (_start_date(days),),
+        )
+        return self._dual_line_plot(
+            rows=rows,
+            title="Sleep / Energy",
+            ylabel="Hours / score",
+            left_key="sleep_hours",
+            left_label="sleep",
+            right_key="energy",
+            right_label="energy",
+            filename="sleep_energy",
+            days=days,
+        )
+
+    def _stress_workout(self, days: int) -> PlotResult:
+        rows = self._rows(
+            """
+            WITH dates AS (
+                SELECT date FROM daily_checkins WHERE date >= ?
+                UNION SELECT date FROM workout_logs WHERE date >= ?
+            )
+            SELECT dates.date AS date,
+                   (SELECT AVG(stress) FROM daily_checkins d WHERE d.date = dates.date) AS stress,
+                   (SELECT SUM(duration_min) FROM workout_logs w WHERE w.date = dates.date) AS duration_min
+            FROM dates
+            WHERE stress IS NOT NULL OR duration_min IS NOT NULL
+            ORDER BY dates.date
+            """,
+            (_start_date(days), _start_date(days)),
+        )
+        return self._dual_line_plot(
+            rows=rows,
+            title="Stress / Training",
+            ylabel="Score / min",
+            left_key="stress",
+            left_label="stress",
+            right_key="duration_min",
+            right_label="training",
+            filename="stress_workout",
+            days=days,
+        )
+
     def _workout_duration(self, days: int) -> PlotResult:
         rows = self._rows(
             """
@@ -154,6 +265,53 @@ class PlotService:
             (_start_date(days),),
         )
         return self._bar_plot(rows, "Workout duration", "Minutes", "duration_min", "workout_duration")
+
+    def _workout_frequency(self, days: int) -> PlotResult:
+        rows = self._rows(
+            """
+            SELECT date, COUNT(*) AS value
+            FROM workout_logs
+            WHERE date >= ?
+            GROUP BY date
+            ORDER BY date
+            """,
+            (_start_date(days),),
+        )
+        return self._bar_plot(rows, "Workout frequency", "Sessions", "value", "workout_frequency")
+
+    def _exercise_history(self, days: int, subject: str | None) -> PlotResult:
+        if subject:
+            rows = self._rows(
+                """
+                SELECT w.date AS date,
+                       SUM(COALESCE(e.sets, 1)) AS value
+                FROM workout_exercises e
+                JOIN workout_logs w ON w.id = e.workout_id
+                WHERE w.date >= ? AND LOWER(e.name) LIKE ?
+                GROUP BY w.date
+                ORDER BY w.date
+                """,
+                (_start_date(days), f"%{subject.lower()}%"),
+            )
+            title = f"{subject.title()} history"
+            filename = f"exercise_{_slug(subject)}"
+        else:
+            rows = self._rows(
+                """
+                SELECT e.name AS label,
+                       COUNT(*) AS value
+                FROM workout_exercises e
+                JOIN workout_logs w ON w.id = e.workout_id
+                WHERE w.date >= ?
+                GROUP BY LOWER(e.name)
+                ORDER BY value DESC, e.name
+                LIMIT 8
+                """,
+                (_start_date(days),),
+            )
+            title = "Exercise history"
+            filename = "exercise_history"
+        return self._bar_plot(rows, title, "Sets / mentions", "value", filename)
 
     def _career_hours(self, days: int) -> PlotResult:
         rows = self._rows(
@@ -168,6 +326,21 @@ class PlotService:
         )
         return self._bar_plot(rows, "Career hours", "Hours", "duration_hours", "career_hours")
 
+    def _career_projects(self, days: int) -> PlotResult:
+        rows = self._rows(
+            """
+            SELECT COALESCE(NULLIF(project, ''), 'unspecified') AS label,
+                   SUM(duration_hours) AS value
+            FROM career_logs
+            WHERE date >= ? AND duration_hours IS NOT NULL
+            GROUP BY COALESCE(NULLIF(project, ''), 'unspecified')
+            ORDER BY value DESC
+            LIMIT 8
+            """,
+            (_start_date(days),),
+        )
+        return self._bar_plot(rows, "Deep work by project", "Hours", "value", "career_projects")
+
     def _nutrition_metric(self, column: str, title: str, ylabel: str, days: int) -> PlotResult:
         rows = self._rows(
             f"""
@@ -181,6 +354,76 @@ class PlotService:
         )
         return self._bar_plot(rows, title, ylabel, "value", column)
 
+    def _data_completeness(self, days: int) -> PlotResult:
+        rows = self._rows(
+            """
+            WITH dates AS (
+                SELECT date FROM daily_checkins WHERE date >= ?
+                UNION SELECT date FROM nutrition_logs WHERE date >= ?
+                UNION SELECT date FROM workout_logs WHERE date >= ?
+                UNION SELECT date FROM career_logs WHERE date >= ?
+                UNION SELECT date FROM journal_entries WHERE date >= ?
+            )
+            SELECT dates.date AS date,
+                   EXISTS(SELECT 1 FROM daily_checkins d WHERE d.date = dates.date) AS wellbeing,
+                   EXISTS(SELECT 1 FROM nutrition_logs n WHERE n.date = dates.date) AS nutrition,
+                   EXISTS(SELECT 1 FROM workout_logs w WHERE w.date = dates.date) AS workout,
+                   EXISTS(SELECT 1 FROM career_logs c WHERE c.date = dates.date) AS career,
+                   EXISTS(SELECT 1 FROM journal_entries j WHERE j.date = dates.date) AS journal
+            FROM dates
+            ORDER BY dates.date
+            """,
+            tuple(_start_date(days) for _ in range(5)),
+        )
+        path = self._path("data_completeness")
+        fig, ax = _figure()
+        categories = ["wellbeing", "nutrition", "workout", "career", "journal"]
+        dates = [row["date"] for row in rows]
+        if rows:
+            matrix = [[int(row[category]) for row in rows] for category in categories]
+            ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
+            ax.set_yticks(list(range(len(categories))))
+            ax.set_yticklabels([category.title() for category in categories])
+            ax.set_xticks(list(range(len(dates))))
+            ax.set_xticklabels(dates, rotation=35, ha="right")
+            for y, values in enumerate(matrix):
+                for x, value in enumerate(values):
+                    if value:
+                        ax.text(x, y, "x", ha="center", va="center", color=PAPER, fontsize=8, fontweight="bold")
+        _style_axis(ax, "Data Completeness", "", rows, kicker=f"Last {days} days", integer_y=False)
+        ax.grid(False)
+        _save(fig, path)
+        return PlotResult(path=path, title="Data completeness", detail=f"{len(rows)} day(s)")
+
+    def _dual_line_plot(
+        self,
+        rows: list[sqlite3.Row],
+        title: str,
+        ylabel: str,
+        left_key: str,
+        left_label: str,
+        right_key: str,
+        right_label: str,
+        filename: str,
+        days: int,
+    ) -> PlotResult:
+        path = self._path(filename)
+        fig, ax = _figure()
+        dates = [row["date"] for row in rows]
+        x_values = list(range(len(dates)))
+        if rows:
+            left_values = [row[left_key] for row in rows]
+            right_values = [row[right_key] for row in rows]
+            ax.plot(x_values, left_values, marker="o", markersize=7, linewidth=2.6, color=INK, label=left_label)
+            ax.plot(x_values, right_values, marker="o", markersize=7, linewidth=2.6, color=RED, label=right_label)
+            _annotate_last(ax, x_values, left_values, left_label, INK)
+            _annotate_last(ax, x_values, right_values, right_label, RED)
+        _style_axis(ax, title, ylabel, rows, kicker=f"Last {days} days")
+        _set_date_ticks(ax, x_values, dates)
+        ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+        _save(fig, path)
+        return PlotResult(path=path, title=title, detail=f"{len(rows)} day(s)")
+
     def _bar_plot(
         self,
         rows: list[sqlite3.Row],
@@ -191,7 +434,10 @@ class PlotService:
     ) -> PlotResult:
         path = self._path(filename)
         fig, ax = _figure()
-        dates = [row["date"] for row in rows]
+        if rows and "label" in rows[0].keys():
+            dates = [row["label"] for row in rows]
+        else:
+            dates = [row["date"] for row in rows]
         x_values = list(range(len(dates)))
         values = [row[value_key] for row in rows]
         if rows:
@@ -219,7 +465,67 @@ def _figure():
     return fig, ax
 
 
-def _style_axis(ax, title: str, ylabel: str, rows: list[sqlite3.Row], kicker: str) -> None:
+def supported_plots() -> list[dict[str, Any]]:
+    return SUPPORTED_PLOTS
+
+
+def _parse_days(lower: str) -> int:
+    if "week" in lower or "7 day" in lower:
+        return 7
+    if "90" in lower or "3 month" in lower or "quarter" in lower:
+        return 90
+    if "month" in lower or "30 day" in lower:
+        return 30
+
+    match = None
+    for pattern in (r"last\s+(\d+)\s+days?", r"(\d+)\s+day"):
+        match = re.search(pattern, lower)
+        if match:
+            break
+    if match:
+        return max(1, min(int(match.group(1)), 365))
+    return 30
+
+
+def _parse_exercise_subject(lower: str) -> str | None:
+    candidates = (
+        ("squats", "squat"),
+        ("squat", "squat"),
+        ("deadlifts", "deadlift"),
+        ("deadlift", "deadlift"),
+        ("rdl", "romanian deadlift"),
+        ("romanian deadlift", "romanian deadlift"),
+        ("lunges", "lunge"),
+        ("lunge", "lunge"),
+        ("chin ups", "chin up"),
+        ("chin-ups", "chin up"),
+        ("chin up", "chin up"),
+        ("dumbbell press", "dumbbell press"),
+        ("dumbell press", "dumbbell press"),
+        ("metcon", "metcon"),
+    )
+    for marker, subject in candidates:
+        if marker in lower:
+            return subject
+    return None
+
+
+def _slug(value: str) -> str:
+    return "_".join(part for part in value.lower().replace("-", " ").split() if part)
+
+
+def _completion_cmap() -> ListedColormap:
+    return ListedColormap([PAPER, INK])
+
+
+def _style_axis(
+    ax,
+    title: str,
+    ylabel: str,
+    rows: list[sqlite3.Row],
+    kicker: str,
+    integer_y: bool = True,
+) -> None:
     ax.text(
         0,
         1.14,
@@ -247,7 +553,8 @@ def _style_axis(ax, title: str, ylabel: str, rows: list[sqlite3.Row], kicker: st
     ax.grid(axis="y", color=GRID, linewidth=0.8)
     ax.set_axisbelow(True)
     ax.tick_params(axis="both", colors=INK, labelsize=9)
-    ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=5))
+    if integer_y:
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=5))
     if not rows:
         ax.text(
             0.5,

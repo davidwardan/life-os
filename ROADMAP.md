@@ -46,14 +46,17 @@ Next:
 
 ## Phase 4: Analytics And Plots
 
-Status: active.
+Status: complete.
 
 - Safe plot request parser
 - Known SQL mappings
 - Minimal chart images returned through Telegram
 - `/api/plots` endpoint
+- `/api/plots/supported` endpoint
+- Multi-line Telegram plot batches
+- Synthetic README plot example
 
-Next plot types:
+Supported plot types:
 
 - Sleep vs energy
 - Stress vs workout load

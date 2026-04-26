@@ -8,7 +8,7 @@ from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
-from backend.app.plotting import PlotRequest, PlotService
+from backend.app.plotting import PlotRequest, PlotService, supported_plots
 from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn, TelegramStatus
 from backend.app.telegram import make_telegram_service, verify_telegram_secret
 
@@ -73,6 +73,11 @@ def list_logs(limit: int = 25) -> dict[str, object]:
 def create_plot(request: PlotRequest) -> dict[str, str]:
     result = plotter.generate(request)
     return {"path": str(result.path), "title": result.title, "detail": result.detail}
+
+
+@app.get("/api/plots/supported")
+def list_supported_plots() -> dict[str, object]:
+    return {"plots": supported_plots()}
 
 
 @app.post("/api/telegram/webhook")
