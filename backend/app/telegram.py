@@ -11,11 +11,15 @@ from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
+from backend.app.plotting import PlotRequest, PlotService, parse_plot_request
 from backend.app.schemas import MessageIn
 
 
 class TelegramClient(Protocol):
     async def send_message(self, chat_id: int, text: str) -> None:
+        ...
+
+    async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
         ...
 
 
@@ -35,6 +39,16 @@ class TelegramBotClient:
             )
             response.raise_for_status()
 
+    async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
+        async with httpx.AsyncClient(timeout=20) as client:
+            with open(photo_path, "rb") as photo:
+                response = await client.post(
+                    f"https://api.telegram.org/bot{self.token}/sendPhoto",
+                    data={"chat_id": chat_id, "caption": caption},
+                    files={"photo": photo},
+                )
+            response.raise_for_status()
+
 
 @dataclass(frozen=True)
 class TelegramResult:
@@ -44,6 +58,7 @@ class TelegramResult:
     confirmation: str | None = None
     extraction_method: str | None = None
     extraction_error: str | None = None
+    plot_path: str | None = None
 
 
 class TelegramService:
@@ -51,12 +66,14 @@ class TelegramService:
         self,
         db: LifeDatabase,
         extractor: ExtractionService,
+        plotter: PlotService | None = None,
         client: TelegramClient | None = None,
         allowed_user_ids: frozenset[int] = settings.telegram_allowed_user_ids,
         send_confirmations: bool = settings.telegram_send_confirmations,
     ):
         self.db = db
         self.extractor = extractor
+        self.plotter = plotter or PlotService(db)
         self.client = client
         self.allowed_user_ids = allowed_user_ids
         self.send_confirmations = send_confirmations
@@ -89,6 +106,19 @@ class TelegramService:
                 await self.client.send_message(chat_id, confirmation)
             return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
 
+        plot_request = parse_plot_request(text)
+        if plot_request:
+            plot = self.plotter.generate(plot_request)
+            caption = f"{plot.title} ({plot.detail})"
+            if self.client and self.send_confirmations:
+                await self.client.send_photo(chat_id, str(plot.path), caption)
+            return TelegramResult(
+                ok=True,
+                status="plot_sent",
+                confirmation=caption,
+                plot_path=str(plot.path),
+            )
+
         entry_date = _telegram_entry_date(message.get("date"))
         parsed, method, error = await self.extractor.extract(text, entry_date)
         saved = self.db.save_message(MessageIn(text=text, entry_date=entry_date, source="telegram"), parsed)
@@ -109,7 +139,7 @@ class TelegramService:
 
 def make_telegram_service(db: LifeDatabase, extractor: ExtractionService) -> TelegramService:
     client = TelegramBotClient(settings.telegram_bot_token) if settings.telegram_bot_token else None
-    return TelegramService(db=db, extractor=extractor, client=client)
+    return TelegramService(db=db, extractor=extractor, plotter=PlotService(db), client=client)
 
 
 def verify_telegram_secret(header_value: str | None) -> bool:

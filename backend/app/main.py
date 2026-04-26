@@ -8,6 +8,7 @@ from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
+from backend.app.plotting import PlotRequest, PlotService
 from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn, TelegramStatus
 from backend.app.telegram import make_telegram_service, verify_telegram_secret
 
@@ -16,6 +17,7 @@ app = FastAPI(title="Life OS", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 db = LifeDatabase()
 extractor = ExtractionService()
+plotter = PlotService(db)
 telegram_service = make_telegram_service(db, extractor)
 
 
@@ -67,6 +69,12 @@ def list_logs(limit: int = 25) -> dict[str, object]:
     return {"logs": db.recent_logs(bounded_limit)}
 
 
+@app.post("/api/plots")
+def create_plot(request: PlotRequest) -> dict[str, str]:
+    result = plotter.generate(request)
+    return {"path": str(result.path), "title": result.title, "detail": result.detail}
+
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(
     request: Request,
@@ -86,4 +94,5 @@ async def telegram_webhook(
         "raw_message_id": result.raw_message_id,
         "extraction_method": result.extraction_method,
         "extraction_error": result.extraction_error,
+        "plot_path": result.plot_path,
     }

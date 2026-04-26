@@ -4,16 +4,22 @@ from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
 
 from backend.app.db import LifeDatabase
+from backend.app.extraction import extract_daily_log
 from backend.app.llm_extraction import ExtractionService
+from backend.app.schemas import MessageIn
 from backend.app.telegram import TelegramService
 
 
 class FakeTelegramClient:
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
+        self.photos: list[tuple[int, str, str]] = []
 
     async def send_message(self, chat_id: int, text: str) -> None:
         self.sent.append((chat_id, text))
+
+    async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
+        self.photos.append((chat_id, photo_path, caption))
 
 
 class TelegramTests(IsolatedAsyncioTestCase):
@@ -147,3 +153,38 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "ignored_non_logging_reply")
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
             self.assertIn("leave that log as-is", client.sent[0][1])
+
+    async def test_plot_request_sends_photo_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Energy 7, stress 4.",
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log("Energy 7, stress 4.", date(2026, 4, 25)),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "plot my energy",
+                    }
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "plot_sent")
+            self.assertEqual(client.photos[0][0], 456)
+            self.assertTrue(Path(client.photos[0][1]).exists())
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
