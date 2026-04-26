@@ -50,17 +50,35 @@ class OpenRouterClient:
         self,
         api_key: str,
         model: str = settings.openrouter_model,
+        fallback_models: tuple[str, ...] = settings.openrouter_fallback_models,
         base_url: str = settings.openrouter_base_url,
         timeout_seconds: float = settings.llm_timeout_seconds,
     ):
         self.api_key = api_key
         self.model = model
+        self.fallback_models = fallback_models
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
     async def extract(self, text: str, entry_date: date) -> dict[str, Any]:
+        errors: list[str] = []
+        for model in (self.model, *self.fallback_models):
+            try:
+                return await self._extract_with_model(model, text, entry_date)
+            except (
+                asyncio.TimeoutError,
+                httpx.HTTPError,
+                json.JSONDecodeError,
+                ValidationError,
+                ValueError,
+            ) as error:
+                errors.append(f"{model}: {_format_error(error)}")
+
+        raise ValueError("; ".join(errors))
+
+    async def _extract_with_model(self, model: str, text: str, entry_date: date) -> dict[str, Any]:
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {

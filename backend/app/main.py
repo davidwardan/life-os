@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -8,13 +8,15 @@ from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
-from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn
+from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn, TelegramStatus
+from backend.app.telegram import make_telegram_service, verify_telegram_secret
 
 
 app = FastAPI(title="Life OS", version="0.1.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 db = LifeDatabase()
 extractor = ExtractionService()
+telegram_service = make_telegram_service(db, extractor)
 
 
 @app.get("/")
@@ -36,6 +38,16 @@ def extraction_status() -> ExtractionStatus:
     )
 
 
+@app.get("/api/telegram/status", response_model=TelegramStatus)
+def telegram_status() -> TelegramStatus:
+    return TelegramStatus(
+        configured=bool(settings.telegram_bot_token),
+        allowlist_enabled=bool(settings.telegram_allowed_user_ids),
+        confirmations_enabled=settings.telegram_send_confirmations,
+        webhook_secret_enabled=bool(settings.telegram_webhook_secret),
+    )
+
+
 @app.post("/api/messages", response_model=LoggedMessage)
 async def create_message(message: MessageIn) -> LoggedMessage:
     parsed, method, error = await extractor.extract(message.text, message.entry_date)
@@ -53,3 +65,25 @@ async def create_message(message: MessageIn) -> LoggedMessage:
 def list_logs(limit: int = 25) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     return {"logs": db.recent_logs(bounded_limit)}
+
+
+@app.post("/api/telegram/webhook")
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not verify_telegram_secret(x_telegram_bot_api_secret_token):
+        raise HTTPException(status_code=403, detail="Invalid Telegram webhook secret")
+
+    update = await request.json()
+    result = await telegram_service.handle_update(update)
+    if not result.ok and result.status == "unauthorized_user":
+        raise HTTPException(status_code=403, detail="Telegram user is not allowed")
+
+    return {
+        "ok": result.ok,
+        "status": result.status,
+        "raw_message_id": result.raw_message_id,
+        "extraction_method": result.extraction_method,
+        "extraction_error": result.extraction_error,
+    }

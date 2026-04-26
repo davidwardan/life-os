@@ -2,6 +2,7 @@ from datetime import date
 from unittest import IsolatedAsyncioTestCase
 
 from backend.app.llm_extraction import ExtractionService
+from backend.app.llm_extraction import OpenRouterClient
 
 
 class FakeLLMClient:
@@ -52,6 +53,37 @@ class BrokenLLMClient:
         return {"not": "valid"}
 
 
+class FallbackOpenRouterClient(OpenRouterClient):
+    def __init__(self) -> None:
+        super().__init__(
+            api_key="test",
+            model="primary-model",
+            fallback_models=("fallback-model",),
+        )
+        self.models: list[str] = []
+
+    async def _extract_with_model(self, model: str, text: str, entry_date: date) -> dict[str, object]:
+        self.models.append(model)
+        if model == "primary-model":
+            raise TimeoutError("primary timed out")
+        return {
+            "entry_date": entry_date.isoformat(),
+            "nutrition": [],
+            "workout": None,
+            "wellbeing": {
+                "mood": None,
+                "energy": 7,
+                "stress": None,
+                "sleep_hours": None,
+                "sleep_quality": None,
+                "confidence": 0.8,
+            },
+            "career": [],
+            "journal_text": None,
+            "missing_info_questions": [],
+        }
+
+
 class LLMExtractionTests(IsolatedAsyncioTestCase):
     async def test_validates_fake_llm_output(self) -> None:
         service = ExtractionService(mode="llm", llm_client=FakeLLMClient())
@@ -80,3 +112,13 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertIn("LLM extraction failed", error)
         self.assertEqual(parsed.workout.workout_type, "legs")
 
+    async def test_openrouter_client_tries_fallback_models(self) -> None:
+        client = FallbackOpenRouterClient()
+        service = ExtractionService(mode="llm", llm_client=client)
+
+        parsed, method, error = await service.extract("Energy 7.", date(2026, 4, 25))
+
+        self.assertEqual(method, "llm")
+        self.assertIsNone(error)
+        self.assertEqual(client.models, ["primary-model", "fallback-model"])
+        self.assertEqual(parsed.wellbeing.energy, 7)

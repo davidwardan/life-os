@@ -71,3 +71,10 @@ class ExtractionStatus(BaseModel):
     mode: str
     configured: bool
     model: str | None = None
+
+
+class TelegramStatus(BaseModel):
+    configured: bool
+    allowlist_enabled: bool
+    confirmations_enabled: bool
+    webhook_secret_enabled: bool

@@ -42,11 +42,72 @@ Phase 2 supports OpenRouter for schema-validated LLM extraction. By default, the
 ```bash
 export OPENROUTER_API_KEY="..."
 export LIFE_OS_EXTRACTOR=llm
-export LIFE_OS_LLM_MODEL="openai/gpt-4o-mini"
+export OPENROUTER_MODEL="nvidia/nemotron-3-super-120b-a12b:free"
+export OPENROUTER_FALLBACK_MODELS="nvidia/nemotron-3-nano-30b-a3b:free"
 uvicorn backend.app.main:app --reload
 ```
 
 Use `LIFE_OS_EXTRACTOR=auto` to use OpenRouter when configured and deterministic extraction otherwise.
+
+## Telegram Setup
+
+Phase 3 adds a Telegram webhook endpoint:
+
+```text
+POST /api/telegram/webhook
+```
+
+Credentials needed from you:
+
+```text
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_ALLOWED_USER_IDS=
+TELEGRAM_WEBHOOK_SECRET=
+```
+
+Place these in the ignored local `.env` file, not in source code.
+
+Create the bot token with BotFather. Get your numeric Telegram user ID from a bot such as `@userinfobot`, then put it in `TELEGRAM_ALLOWED_USER_IDS`. Keep the allowlist enabled before exposing the webhook.
+
+For local development, keep confirmations disabled if you do not want the app to call Telegram:
+
+```bash
+export TELEGRAM_SEND_CONFIRMATIONS=false
+```
+
+When the app is reachable through a secure public URL, set the Telegram webhook with:
+
+```bash
+python scripts/set_telegram_webhook.py https://your-public-url.example
+```
+
+Do not put real tokens in the repository.
+
+### Free ngrok Tunnel
+
+ngrok free is enough for development webhook testing. Add your free ngrok authtoken to the ignored `.env` file:
+
+```text
+NGROK_AUTHTOKEN=
+```
+
+Start the local app:
+
+```bash
+uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+```
+
+In another terminal, start ngrok:
+
+```bash
+python scripts/start_ngrok.py
+```
+
+The script prints the public HTTPS URL. Register that URL with Telegram:
+
+```bash
+python scripts/set_telegram_webhook.py https://your-ngrok-url.ngrok-free.app
+```
 
 ## Test
 
@@ -74,7 +135,7 @@ python -m unittest discover -s tests
 
 - Telegram webhook
 - User allowlist
-- Message confirmations
+- Optional message confirmations
 
 ### Phase 4: Analytics And Plots
 
