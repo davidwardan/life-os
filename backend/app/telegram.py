@@ -11,7 +11,7 @@ from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
-from backend.app.plotting import PlotRequest, PlotService, parse_plot_request
+from backend.app.plotting import PlotRequest, PlotService, parse_plot_requests
 from backend.app.schemas import MessageIn
 
 
@@ -59,6 +59,7 @@ class TelegramResult:
     extraction_method: str | None = None
     extraction_error: str | None = None
     plot_path: str | None = None
+    plot_paths: tuple[str, ...] = ()
 
 
 class TelegramService:
@@ -106,17 +107,27 @@ class TelegramService:
                 await self.client.send_message(chat_id, confirmation)
             return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
 
-        plot_request = parse_plot_request(text)
-        if plot_request:
-            plot = self.plotter.generate(plot_request)
-            caption = f"{plot.title} ({plot.detail})"
+        plot_requests = parse_plot_requests(text)
+        if plot_requests:
+            plot_paths = []
+            captions = []
+            for plot_request in plot_requests:
+                plot = self.plotter.generate(plot_request)
+                caption = f"{plot.title} ({plot.detail})"
+                plot_paths.append(str(plot.path))
+                captions.append(caption)
+                if self.client and self.send_confirmations:
+                    await self.client.send_photo(chat_id, str(plot.path), caption)
+            confirmation = captions[0] if len(captions) == 1 else f"Sent {len(captions)} plots."
             if self.client and self.send_confirmations:
-                await self.client.send_photo(chat_id, str(plot.path), caption)
+                if len(captions) > 1:
+                    await self.client.send_message(chat_id, confirmation)
             return TelegramResult(
                 ok=True,
                 status="plot_sent",
-                confirmation=caption,
-                plot_path=str(plot.path),
+                confirmation=confirmation,
+                plot_path=plot_paths[0] if plot_paths else None,
+                plot_paths=tuple(plot_paths),
             )
 
         entry_date = _telegram_entry_date(message.get("date"))

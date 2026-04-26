@@ -5,7 +5,7 @@ from unittest import TestCase
 
 from backend.app.db import LifeDatabase
 from backend.app.extraction import extract_daily_log
-from backend.app.plotting import PlotRequest, PlotService, parse_plot_request
+from backend.app.plotting import PlotRequest, PlotService, parse_plot_request, parse_plot_requests
 from backend.app.schemas import MessageIn
 
 
@@ -16,6 +16,21 @@ class PlottingTests(TestCase):
         self.assertIsNotNone(request)
         self.assertEqual(request.metric, "energy")
         self.assertEqual(request.days, 7)
+
+    def test_parse_multiple_plot_requests_from_lines(self) -> None:
+        requests = parse_plot_requests(
+            "\n".join(
+                [
+                    "plot my energy",
+                    "show my career hours",
+                    "plot my workouts",
+                    "plot protein for the last week",
+                ]
+            )
+        )
+
+        self.assertEqual([request.metric for request in requests], ["energy", "career", "workout", "protein"])
+        self.assertEqual([request.days for request in requests], [30, 30, 30, 7])
 
     def test_generates_energy_plot_png(self) -> None:
         with TemporaryDirectory() as directory:

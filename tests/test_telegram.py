@@ -188,3 +188,59 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(client.photos[0][0], 456)
             self.assertTrue(Path(client.photos[0][1]).exists())
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_multiple_plot_requests_send_multiple_photos_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text=(
+                        "Energy 7, stress 4. Trained legs for 45 min. "
+                        "Worked 2 hours on the paper. Ate chicken with 40g protein."
+                    ),
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log(
+                    (
+                        "Energy 7, stress 4. Trained legs for 45 min. "
+                        "Worked 2 hours on the paper. Ate chicken with 40g protein."
+                    ),
+                    date(2026, 4, 25),
+                ),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "\n".join(
+                            [
+                                "plot my energy",
+                                "show my career hours",
+                                "plot my workouts",
+                                "plot protein for the last week",
+                            ]
+                        ),
+                    }
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "plot_sent")
+            self.assertEqual(len(client.photos), 4)
+            self.assertEqual(len(result.plot_paths), 4)
+            self.assertIn("Energy and stress", client.photos[0][2])
+            self.assertIn("Career hours", client.photos[1][2])
+            self.assertIn("Workout duration", client.photos[2][2])
+            self.assertIn("Protein", client.photos[3][2])
+            self.assertEqual(client.sent[0], (456, "Sent 4 plots."))
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)

@@ -81,6 +81,18 @@ def parse_plot_request(text: str) -> PlotRequest | None:
     return PlotRequest(metric="energy", days=days)
 
 
+def parse_plot_requests(text: str) -> list[PlotRequest]:
+    parts = [part.strip() for part in text.splitlines() if part.strip()]
+    if len(parts) <= 1:
+        request = parse_plot_request(text)
+        return [request] if request else []
+
+    requests = [parse_plot_request(part) for part in parts]
+    if any(request is None for request in requests):
+        return []
+    return [request for request in requests if request is not None]
+
+
 class PlotService:
     def __init__(self, db: LifeDatabase, plots_dir: Path = PLOTS_DIR):
         self.db = db
@@ -197,7 +209,7 @@ class PlotService:
             return connection.execute(query, params).fetchall()
 
     def _path(self, name: str) -> Path:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         return self.plots_dir / f"{name}_{stamp}.png"
 
 

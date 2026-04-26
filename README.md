@@ -1,32 +1,72 @@
 # Life OS
 
-Local-first personal logging and briefing system.
+A local-first life logging assistant with a minimalist interface, structured memory, Telegram input, and Swiss-inspired analytics.
 
-Phase 1 focuses on the core data loop:
+Life OS is built around one idea: your agent should not be the database. The app keeps your raw notes, extracts structured records, stores them locally, and uses those records for plots, summaries, and future daily briefings.
 
-1. Write a messy daily note.
-2. Store the raw message.
-3. Extract structured life logs.
-4. Save everything locally in SQLite.
-5. Review the result in a minimal web interface.
+![Life OS energy and stress plot](docs/assets/life-os-energy-stress.png)
 
-The agent and messaging integrations will sit on top of this core instead of owning the data.
+## What It Does
 
-## Stack
+Send a messy note from the web app or Telegram:
 
-- FastAPI backend
-- SQLite local database
-- Standard-library SQLite persistence
-- Deterministic extractor for phase 1 validation
-- Minimal Swiss-style web surface served by FastAPI
+```text
+Today I slept 6h, woke up tired, energy 5/10 and stress 7/10.
+Ate oatmeal with dates and peanut butter.
+Did lower body: squats 4x5 at 80%, RDL 3x8, and 12 min metcon.
+Worked 3 hours on the global TAGI-LSTM paper and fixed the SKF motivation section.
+```
 
-## Run Locally
+Life OS stores the original text, extracts structured rows, asks useful follow-up questions when details are missing, and keeps everything queryable:
+
+```text
+raw message -> validated extraction -> SQLite rows -> plots, search, briefings
+```
+
+Ask for plots directly in Telegram:
+
+```text
+plot my energy
+show my career hours
+plot my workouts
+plot protein for the last week
+```
+
+If you send those four lines together, Life OS returns four separate chart images.
+
+## Current Features
+
+- Local SQLite source of truth
+- Raw message archive for every logged note
+- Structured logs for wellbeing, nutrition, workouts, exercises, career, and journal entries
+- OpenRouter-backed LLM extraction with deterministic fallback
+- Telegram webhook with user allowlist and webhook secret support
+- Plot generation through safe, predefined query mappings
+- Minimal local web surface served by FastAPI
+- Privacy-focused defaults: ignored `.env`, ignored local data, no arbitrary SQL from the agent
+
+## Architecture
+
+```mermaid
+flowchart TD
+    A["Web app / Telegram"] --> B["FastAPI API"]
+    B --> C["Extractor"]
+    C --> D["Pydantic validation"]
+    D --> E["SQLite source of truth"]
+    E --> F["Plot service"]
+    E --> G["Future briefing service"]
+    F --> H["Telegram chart replies"]
+```
+
+The database is the product core. Agents, chat channels, and dashboards sit on top of it.
+
+## Quick Start
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-uvicorn backend.app.main:app --reload
+python -m uvicorn backend.app.main:app --reload
 ```
 
 Then open:
@@ -35,57 +75,42 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-## Optional OpenRouter Extraction
-
-Phase 2 supports OpenRouter for schema-validated LLM extraction. By default, the app uses the deterministic local extractor.
+Run tests:
 
 ```bash
-export OPENROUTER_API_KEY="..."
-export LIFE_OS_EXTRACTOR=llm
-export OPENROUTER_MODEL="nvidia/nemotron-3-super-120b-a12b:free"
-export OPENROUTER_FALLBACK_MODELS="nvidia/nemotron-3-nano-30b-a3b:free"
-uvicorn backend.app.main:app --reload
+python -m unittest discover -s tests
 ```
 
-Use `LIFE_OS_EXTRACTOR=auto` to use OpenRouter when configured and deterministic extraction otherwise.
+## Configuration
 
-## Telegram Setup
-
-Phase 3 adds a Telegram webhook endpoint:
+Create a local `.env` file. It is ignored by git.
 
 ```text
-POST /api/telegram/webhook
-```
+LIFE_OS_EXTRACTOR=auto
+LIFE_OS_TIMEZONE=America/Toronto
 
-Credentials needed from you:
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-nano-30b-a3b:free
+LIFE_OS_LLM_TIMEOUT_SECONDS=60
 
-```text
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_SEND_CONFIRMATIONS=true
 ```
 
-Place these in the ignored local `.env` file, not in source code.
-
-Create the bot token with BotFather. Get your numeric Telegram user ID from a bot such as `@userinfobot`, then put it in `TELEGRAM_ALLOWED_USER_IDS`. Keep the allowlist enabled before exposing the webhook.
-
-For local development, keep confirmations disabled if you do not want the app to call Telegram:
+For local Telegram testing with ngrok:
 
 ```bash
-export TELEGRAM_SEND_CONFIRMATIONS=false
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
+python scripts/start_ngrok.py
+python scripts/set_telegram_webhook.py https://your-ngrok-url.example
 ```
-
-When the app is reachable through a secure public URL, set the Telegram webhook with:
-
-```bash
-python scripts/set_telegram_webhook.py https://your-public-url.example
-```
-
-Do not put real tokens in the repository.
 
 ## Data Model
 
-Every inbound message is stored first as a raw message, then extracted into normalized event logs:
+Every inbound message becomes one raw record plus zero or more structured records:
 
 ```text
 raw_messages
@@ -97,80 +122,15 @@ career_logs
 journal_entries
 ```
 
-The raw message is preserved for correction. Structured rows keep `source_message_id` so plots, briefings, and future review screens can trace every extracted fact back to the original text.
+Structured rows point back to `source_message_id`, so every chart and future briefing can be traced to the original note.
 
-The extractor distinguishes explicit values from estimated values. For example, `sleep_hours=6` from “slept 6h” is explicit, while a protein estimate from “180g cooked chicken” is stored with `estimated=true` and a lower confidence score.
+## Documentation
 
-When inputs are vague, the app still stores the rough log and asks at most two useful follow-up questions. For example, a vague workout can trigger an exercise detail question, while a missing wellbeing check-in can trigger an energy/stress prompt.
+- [Examples](docs/EXAMPLES.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
 
-### Free ngrok Tunnel
+## Project Direction
 
-ngrok free is enough for development webhook testing. Add your free ngrok authtoken to the ignored `.env` file:
-
-```text
-NGROK_AUTHTOKEN=
-```
-
-Start the local app:
-
-```bash
-uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
-```
-
-In another terminal, start ngrok:
-
-```bash
-python scripts/start_ngrok.py
-```
-
-The script prints the public HTTPS URL. Register that URL with Telegram:
-
-```bash
-python scripts/set_telegram_webhook.py https://your-ngrok-url.ngrok-free.app
-```
-
-## Test
-
-```bash
-python -m unittest discover -s tests
-```
-
-## Phase Plan
-
-### Phase 1: Local Logging Core
-
-- Raw message archive
-- Structured logs for nutrition, workout, wellbeing, career, and journal
-- Local SQLite storage
-- Minimal local dashboard
-- Validation tests
-
-### Phase 2: LLM Extraction
-
-- Add typed LLM JSON extraction through OpenRouter
-- Add confidence thresholds and clarification prompts
-- Keep deterministic validation before database writes
-
-### Phase 3: Telegram
-
-- Telegram webhook
-- User allowlist
-- Optional message confirmations
-
-### Phase 4: Analytics And Plots
-
-- Safe plot specifications
-- Known SQL query mappings
-- Chart images for chat and dashboard charts
-
-### Phase 5: Morning Briefing
-
-- Scheduled local job
-- Deterministic trend features
-- Agent-written daily guidance
-
-### Phase 6: OpenClaw / WhatsApp
-
-- Optional gateway integration
-- Narrow Life OS tools only
-- No broad filesystem, shell, or arbitrary SQL access
+The MVP is now centered on logging, extraction, Telegram, and plots. Next phases focus on better review/edit workflows, richer analytics, semantic journal search, and morning briefings that combine deterministic trend features with agent-written guidance.
