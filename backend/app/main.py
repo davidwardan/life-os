@@ -4,6 +4,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.app.briefing import BriefingService
 from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
@@ -18,6 +19,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 db = LifeDatabase()
 extractor = ExtractionService()
 plotter = PlotService(db)
+briefing_service = BriefingService(db)
 telegram_service = make_telegram_service(db, extractor)
 
 
@@ -80,6 +82,41 @@ def list_supported_plots() -> dict[str, object]:
     return {"plots": supported_plots()}
 
 
+@app.get("/api/briefing")
+async def create_briefing() -> dict[str, object]:
+    briefing = await briefing_service.generate()
+    return {
+        "date": briefing.date.isoformat(),
+        "text": briefing.text,
+        "features": briefing.features,
+        "method": briefing.method,
+        "error": briefing.error,
+    }
+
+
+@app.post("/api/briefing/send")
+async def send_telegram_briefing(
+    x_life_os_cron_secret: str | None = Header(default=None),
+) -> dict[str, object]:
+    if not settings.briefing_cron_secret:
+        raise HTTPException(status_code=403, detail="BRIEFING_CRON_SECRET is not configured")
+    if x_life_os_cron_secret != settings.briefing_cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid briefing cron secret")
+    if not settings.telegram_briefing_chat_id:
+        raise HTTPException(status_code=400, detail="TELEGRAM_BRIEFING_CHAT_ID is not configured")
+    if telegram_service.client is None:
+        raise HTTPException(status_code=400, detail="TELEGRAM_BOT_TOKEN is not configured")
+
+    briefing = await briefing_service.generate()
+    await telegram_service.client.send_message(settings.telegram_briefing_chat_id, briefing.text)
+    return {
+        "sent": True,
+        "date": briefing.date.isoformat(),
+        "method": briefing.method,
+        "error": briefing.error,
+    }
+
+
 @app.post("/api/telegram/webhook")
 async def telegram_webhook(
     request: Request,
@@ -100,4 +137,6 @@ async def telegram_webhook(
         "extraction_method": result.extraction_method,
         "extraction_error": result.extraction_error,
         "plot_path": result.plot_path,
+        "briefing_method": result.briefing_method,
+        "briefing_error": result.briefing_error,
     }

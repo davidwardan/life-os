@@ -244,3 +244,39 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertIn("Protein", client.photos[3][2])
             self.assertEqual(client.sent[0], (456, "Sent 4 plots."))
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_briefing_request_sends_briefing_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Energy 7, stress 4. Worked 2h on Life OS.",
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log("Energy 7, stress 4. Worked 2h on Life OS.", date(2026, 4, 25)),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "date": 1777132800,
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "morning brief",
+                    }
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "briefing_sent")
+            self.assertEqual(result.briefing_method, "deterministic")
+            self.assertIn("Morning brief", client.sent[0][1])
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)

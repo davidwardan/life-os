@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from backend.app.briefing import BriefingService, is_briefing_request
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.extraction import is_non_logging_reply
@@ -60,6 +61,8 @@ class TelegramResult:
     extraction_error: str | None = None
     plot_path: str | None = None
     plot_paths: tuple[str, ...] = ()
+    briefing_method: str | None = None
+    briefing_error: str | None = None
 
 
 class TelegramService:
@@ -68,6 +71,7 @@ class TelegramService:
         db: LifeDatabase,
         extractor: ExtractionService,
         plotter: PlotService | None = None,
+        briefing_service: BriefingService | None = None,
         client: TelegramClient | None = None,
         allowed_user_ids: frozenset[int] = settings.telegram_allowed_user_ids,
         send_confirmations: bool = settings.telegram_send_confirmations,
@@ -75,6 +79,7 @@ class TelegramService:
         self.db = db
         self.extractor = extractor
         self.plotter = plotter or PlotService(db)
+        self.briefing_service = briefing_service or BriefingService(db)
         self.client = client
         self.allowed_user_ids = allowed_user_ids
         self.send_confirmations = send_confirmations
@@ -106,6 +111,18 @@ class TelegramService:
             if self.client and self.send_confirmations:
                 await self.client.send_message(chat_id, confirmation)
             return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
+
+        if is_briefing_request(text):
+            briefing = await self.briefing_service.generate(_telegram_entry_date(message.get("date")))
+            if self.client and self.send_confirmations:
+                await self.client.send_message(chat_id, briefing.text)
+            return TelegramResult(
+                ok=True,
+                status="briefing_sent",
+                confirmation=briefing.text,
+                briefing_method=briefing.method,
+                briefing_error=briefing.error,
+            )
 
         plot_requests = parse_plot_requests(text)
         if plot_requests:
@@ -150,7 +167,13 @@ class TelegramService:
 
 def make_telegram_service(db: LifeDatabase, extractor: ExtractionService) -> TelegramService:
     client = TelegramBotClient(settings.telegram_bot_token) if settings.telegram_bot_token else None
-    return TelegramService(db=db, extractor=extractor, plotter=PlotService(db), client=client)
+    return TelegramService(
+        db=db,
+        extractor=extractor,
+        plotter=PlotService(db),
+        briefing_service=BriefingService(db),
+        client=client,
+    )
 
 
 def verify_telegram_secret(header_value: str | None) -> bool:

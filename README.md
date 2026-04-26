@@ -43,6 +43,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
 - Multi-line Telegram plot batches
+- Morning briefings from deterministic trend features with optional LLM wording
 - Minimal local web surface served by FastAPI
 - Privacy-focused defaults: ignored `.env`, ignored local data, no arbitrary SQL from the agent
 
@@ -55,7 +56,7 @@ flowchart TD
     C --> D["Pydantic validation"]
     D --> E["SQLite source of truth"]
     E --> F["Plot service"]
-    E --> G["Future briefing service"]
+    E --> G["Morning briefing service"]
     F --> H["Telegram chart replies"]
 ```
 
@@ -102,7 +103,9 @@ LIFE_OS_LLM_TIMEOUT_SECONDS=60
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_BRIEFING_CHAT_ID=
 TELEGRAM_SEND_CONFIRMATIONS=true
+BRIEFING_CRON_SECRET=
 
 TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
@@ -114,6 +117,13 @@ For local Telegram testing with ngrok:
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 python scripts/start_ngrok.py
 python scripts/set_telegram_webhook.py https://your-ngrok-url.example
+```
+
+Ask Telegram for a briefing:
+
+```text
+morning brief
+/brief
 ```
 
 ## Data Model
@@ -142,4 +152,4 @@ Structured rows point back to `source_message_id`, so every chart and future bri
 
 ## Project Direction
 
-The MVP is now centered on logging, extraction, Telegram, and plots. The next phase is morning briefings that combine deterministic trend features with agent-written guidance.
+The MVP is now centered on logging, extraction, Telegram, plots, and morning briefings. Next phases focus on search, memory, and optional gateway integrations.

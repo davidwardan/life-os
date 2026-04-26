@@ -68,12 +68,17 @@ Supported plot types:
 
 ## Phase 5: Morning Briefing
 
-Status: planned.
+Status: active.
 
-- Scheduler
 - Deterministic trend feature extraction
-- Goal-aware daily guidance
-- Telegram push notification
+- Optional LLM-written daily guidance
+- Telegram on-demand briefing
+- Protected HTTP endpoint for scheduled Telegram delivery
+
+Next:
+
+- External cron setup for free scheduled delivery on Render
+- Goal configuration
 - Briefing archive for review
 
 ## Phase 6: Search And Memory

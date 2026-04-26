@@ -33,6 +33,10 @@ services:
         sync: false
       - key: TELEGRAM_WEBHOOK_SECRET
         sync: false
+      - key: TELEGRAM_BRIEFING_CHAT_ID
+        sync: false
+      - key: BRIEFING_CRON_SECRET
+        sync: false
       - key: TURSO_DATABASE_URL
         sync: false
       - key: TURSO_AUTH_TOKEN

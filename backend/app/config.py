@@ -48,6 +48,10 @@ class Settings:
     turso_sync_interval_seconds: int | None = (
         int(value) if (value := getenv("TURSO_SYNC_INTERVAL_SECONDS")) else None
     )
+    briefing_cron_secret: str | None = getenv("BRIEFING_CRON_SECRET")
+    telegram_briefing_chat_id: int | None = (
+        int(value) if (value := getenv("TELEGRAM_BRIEFING_CHAT_ID")) else None
+    )
 
 
 settings = Settings()

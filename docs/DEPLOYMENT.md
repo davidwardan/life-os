@@ -71,6 +71,8 @@ OPENROUTER_API_KEY=
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
+TELEGRAM_BRIEFING_CHAT_ID=
+BRIEFING_CRON_SECRET=
 TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
@@ -108,6 +110,7 @@ Check:
 https://your-life-os.onrender.com/health
 https://your-life-os.onrender.com/api/telegram/status
 https://your-life-os.onrender.com/api/plots/supported
+https://your-life-os.onrender.com/api/briefing
 ```
 
 Then send a Telegram message:
@@ -122,9 +125,23 @@ And then:
 plot my energy
 ```
 
+For a manual briefing test:
+
+```text
+morning brief
+```
+
+For scheduled delivery, configure a free external cron service to send:
+
+```text
+POST https://your-life-os.onrender.com/api/briefing/send
+X-Life-Os-Cron-Secret: your-briefing-secret
+```
+
 ## Notes
 
 - Render free services spin down when idle, so Telegram requests can have cold-start latency.
+- Render Cron Jobs have a minimum monthly charge, so for a fully free morning briefing use a free external HTTP cron service that sends `POST /api/briefing/send` with the `X-Life-Os-Cron-Secret` header.
 - Keep the Telegram allowlist enabled before exposing the webhook.
 - Treat cloud deployment as less private than your local machine. This is sensitive life data.
 - If you want maximum privacy later, move back to a local machine with Tailscale and use the same app.
