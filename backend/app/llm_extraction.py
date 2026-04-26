@@ -10,33 +10,46 @@ from pydantic import ValidationError
 
 from backend.app.config import settings
 from backend.app.extraction import extract_daily_log
+from backend.app.followup import build_followup_questions
 from backend.app.schemas import ParsedDailyLog
 
 
 SYSTEM_PROMPT = """
-You extract structured records from one personal daily log message.
+You are an information extraction system for a local personal life logging app.
 
-Return only JSON that matches the provided schema.
+Convert one daily message into structured JSON. Return only JSON that matches the provided schema.
 
 Rules:
-- Preserve the user's raw meaning. Do not invent facts.
+- Only extract information supported by the text.
+- Do not invent missing values.
+- Use null for unknown fields.
+- Preserve the user's raw meaning.
 - Extract every category independently; do not stop after finding nutrition or workout.
-- Use null when a value is not stated.
 - Use confidence between 0 and 1 for each extracted record.
-- Mark nutrition as estimated=true unless exact calories or macros are explicitly provided.
-- Put open-ended reflection into journal_text when it is a journal note.
-- Add missing_info_questions only for useful follow-up questions.
+- If you estimate calories or macros, mark estimated=true and keep confidence conservative.
+- If a numeric value is explicitly stated, store it directly and do not mark it as estimated.
+- Store vague logs too; use low confidence and ask at most two clarification questions.
+- Put open-ended reflection into journal.text with concise tags.
+- Add clarification_questions only for useful follow-up questions.
 - Dates must use ISO format YYYY-MM-DD.
 
 Extraction checklist:
 - Food, meals, calories, protein, macros -> nutrition.
-- Training, exercise, workout duration, RPE, intensity -> workout.
+- Meal timing such as morning/lunch/dinner -> nutrition.meal_type.
+- Training, exercise, workout duration, RPE, intensity -> workout and workout.exercises.
 - Energy, mood, stress, sleep, soreness, recovery -> wellbeing.
 - Work sessions, career progress, project names, research, writing, blockers -> career.
 
 Example:
-Text: "Ate yogurt. Trained legs 55 min intensity 8. Energy 6, stress 5. Worked 2h on thesis and drafted intro."
-Must include nutrition, workout, wellbeing with energy=6 and stress=5, and career with project="thesis", duration_hours=2, progress_note="drafted intro".
+Text: "Today I slept 6h, energy 5/10 and stress 7/10. Ate oatmeal with dates in the morning. Lunch was 180g cooked chicken with rice. Did lower body: squats 4x5 at 80%, RDL 3x8, and 12 min metcon. Worked 3 hours on the global TAGI-LSTM paper and fixed the SKF motivation section. Mood was okay but I felt mentally drained."
+Must include:
+- date
+- wellbeing.sleep_hours=6, energy=5, stress=7, mood around 6 if "okay"
+- breakfast and lunch nutrition entries
+- estimated protein only if estimating from chicken, with estimated=true
+- workout.type/lower body plus exercise rows for squat, Romanian deadlift, metcon
+- career project, duration_hours=3, activity, progress_note
+- journal text and tags for fatigue/stress/research
 """.strip()
 
 
@@ -144,6 +157,7 @@ class ExtractionService:
             parsed = ParsedDailyLog.model_validate(await client.extract(text, target_date))
             if entry_date is not None:
                 parsed.entry_date = entry_date
+            parsed.clarification_questions = build_followup_questions(parsed)
             return parsed, "llm", None
         except (asyncio.TimeoutError, httpx.HTTPError, json.JSONDecodeError, ValidationError, ValueError) as error:
             fallback = extract_daily_log(text, target_date)

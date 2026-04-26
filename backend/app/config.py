@@ -28,7 +28,7 @@ class Settings:
     openrouter_fallback_models: tuple[str, ...] = _split_csv(
         getenv("OPENROUTER_FALLBACK_MODELS", "")
     )
-    llm_timeout_seconds: float = float(getenv("LIFE_OS_LLM_TIMEOUT_SECONDS", "30"))
+    llm_timeout_seconds: float = float(getenv("LIFE_OS_LLM_TIMEOUT_SECONDS", "60"))
     telegram_bot_token: str | None = getenv("TELEGRAM_BOT_TOKEN")
     telegram_webhook_secret: str | None = getenv("TELEGRAM_WEBHOOK_SECRET")
     telegram_allowed_user_ids: frozenset[int] = frozenset(

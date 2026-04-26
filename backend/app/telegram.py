@@ -9,6 +9,7 @@ import httpx
 
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
+from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
 from backend.app.schemas import MessageIn
 
@@ -82,6 +83,12 @@ class TelegramService:
         if not isinstance(chat_id, int):
             return TelegramResult(ok=False, status="missing_chat_id")
 
+        if is_non_logging_reply(text):
+            confirmation = "No problem. I will leave that log as-is."
+            if self.client and self.send_confirmations:
+                await self.client.send_message(chat_id, confirmation)
+            return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
+
         entry_date = _telegram_entry_date(message.get("date"))
         parsed, method, error = await self.extractor.extract(text, entry_date)
         saved = self.db.save_message(MessageIn(text=text, entry_date=entry_date, source="telegram"), parsed)
@@ -118,27 +125,63 @@ def _telegram_entry_date(timestamp: Any):
 
 
 def _confirmation(raw_message_id: int, parsed, method: str, error: str | None) -> str:
-    lines = [f"Logged #{raw_message_id} via {method}."]
+    lines = [f"Logged #{raw_message_id} for {parsed.date:%b %-d} via {method}."]
+    if parsed.wellbeing:
+        wellbeing = []
+        if parsed.wellbeing.sleep_hours is not None:
+            wellbeing.append(f"sleep {parsed.wellbeing.sleep_hours:g}h")
+        if parsed.wellbeing.energy is not None:
+            wellbeing.append(f"energy {parsed.wellbeing.energy}/10")
+        if parsed.wellbeing.stress is not None:
+            wellbeing.append(f"stress {parsed.wellbeing.stress}/10")
+        if parsed.wellbeing.mood is not None:
+            wellbeing.append(f"mood {parsed.wellbeing.mood}/10")
+        if wellbeing:
+            lines.append("Wellbeing: " + ", ".join(wellbeing))
+        if parsed.wellbeing.notes:
+            lines.append(f"Note: {parsed.wellbeing.notes}")
+
     if parsed.nutrition:
-        lines.append(f"Nutrition: {len(parsed.nutrition)} item(s)")
+        lines.append("Nutrition:")
+        for item in parsed.nutrition[:4]:
+            meal = f"{item.meal_type}: " if item.meal_type else ""
+            macro_bits = []
+            if item.calories is not None:
+                macro_bits.append(f"{item.calories:g} cal")
+            if item.protein_g is not None:
+                marker = "~" if item.estimated else ""
+                macro_bits.append(f"{marker}{item.protein_g:g}g protein")
+            suffix = f" ({', '.join(macro_bits)})" if macro_bits else ""
+            lines.append(f"- {meal}{item.description}{suffix}")
+
     if parsed.workout:
         workout = parsed.workout.workout_type or "workout"
         duration = f", {parsed.workout.duration_min:g} min" if parsed.workout.duration_min else ""
         lines.append(f"Workout: {workout}{duration}")
-    if parsed.wellbeing:
-        bits = []
-        if parsed.wellbeing.energy is not None:
-            bits.append(f"energy {parsed.wellbeing.energy}/10")
-        if parsed.wellbeing.stress is not None:
-            bits.append(f"stress {parsed.wellbeing.stress}/10")
-        if bits:
-            lines.append(f"Wellbeing: {', '.join(bits)}")
+        for exercise in parsed.workout.exercises[:5]:
+            if exercise.sets and exercise.reps:
+                load = f" at {exercise.load}" if exercise.load else ""
+                lines.append(f"- {exercise.name}: {exercise.sets}x{exercise.reps}{load}")
+            elif exercise.duration_min:
+                lines.append(f"- {exercise.name}: {exercise.duration_min:g} min")
+
     if parsed.career:
-        lines.append(f"Career: {len(parsed.career)} item(s)")
-    if parsed.journal_text:
-        lines.append("Journal: saved")
-    if parsed.missing_info_questions:
-        lines.append("Clarify later: " + parsed.missing_info_questions[0])
+        lines.append("Career:")
+        for item in parsed.career[:3]:
+            duration = f"{item.duration_hours:g}h " if item.duration_hours is not None else ""
+            project = item.project or "work"
+            progress = f" - {item.progress_note}" if item.progress_note else ""
+            lines.append(f"- {duration}on {project}{progress}")
+
+    if parsed.journal:
+        tag_text = f" [{', '.join(parsed.journal.tags)}]" if parsed.journal.tags else ""
+        lines.append(f"Journal: saved{tag_text}")
+
+    if parsed.clarification_questions:
+        label = "Question" if len(parsed.clarification_questions) == 1 else "Questions"
+        lines.append(label + ":")
+        for question in parsed.clarification_questions[:2]:
+            lines.append(f"- {question}")
     if error:
         lines.append(f"Fallback note: {error}")
     return "\n".join(lines)

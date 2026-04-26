@@ -83,6 +83,26 @@ python scripts/set_telegram_webhook.py https://your-public-url.example
 
 Do not put real tokens in the repository.
 
+## Data Model
+
+Every inbound message is stored first as a raw message, then extracted into normalized event logs:
+
+```text
+raw_messages
+daily_checkins
+nutrition_logs
+workout_logs
+workout_exercises
+career_logs
+journal_entries
+```
+
+The raw message is preserved for correction. Structured rows keep `source_message_id` so plots, briefings, and future review screens can trace every extracted fact back to the original text.
+
+The extractor distinguishes explicit values from estimated values. For example, `sleep_hours=6` from “slept 6h” is explicit, while a protein estimate from “180g cooked chicken” is stored with `estimated=true` and a lower confidence score.
+
+When inputs are vague, the app still stores the rough log and asks at most two useful follow-up questions. For example, a vague workout can trigger an exercise detail question, while a missing wellbeing check-in can trigger an energy/stress prompt.
+
 ### Free ngrok Tunnel
 
 ngrok free is enough for development webhook testing. Add your free ngrok authtoken to the ignored `.env` file:

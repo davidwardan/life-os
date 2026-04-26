@@ -8,12 +8,24 @@ from backend.app.llm_extraction import OpenRouterClient
 class FakeLLMClient:
     async def extract(self, text: str, entry_date: date) -> dict[str, object]:
         return {
-            "entry_date": entry_date.isoformat(),
+            "date": entry_date.isoformat(),
+            "wellbeing": {
+                "mood": None,
+                "energy": 6,
+                "stress": 5,
+                "sleep_hours": None,
+                "sleep_quality": None,
+                "notes": None,
+                "confidence": 0.88,
+            },
             "nutrition": [
                 {
-                    "meal_name": "oatmeal with dates",
+                    "meal_type": "breakfast",
+                    "description": "oatmeal with dates",
                     "calories": None,
                     "protein_g": None,
+                    "carbs_g": None,
+                    "fat_g": None,
                     "confidence": 0.82,
                     "estimated": True,
                 }
@@ -23,15 +35,8 @@ class FakeLLMClient:
                 "duration_min": 60,
                 "intensity": 8,
                 "notes": "heavy leg day",
+                "exercises": [{"name": "squat", "sets": 4, "reps": 5, "load": None}],
                 "confidence": 0.9,
-            },
-            "wellbeing": {
-                "mood": None,
-                "energy": 6,
-                "stress": 5,
-                "sleep_hours": None,
-                "sleep_quality": None,
-                "confidence": 0.88,
             },
             "career": [
                 {
@@ -43,8 +48,8 @@ class FakeLLMClient:
                     "confidence": 0.86,
                 }
             ],
-            "journal_text": None,
-            "missing_info_questions": [],
+            "journal": None,
+            "clarification_questions": [],
         }
 
 
@@ -67,7 +72,7 @@ class FallbackOpenRouterClient(OpenRouterClient):
         if model == "primary-model":
             raise TimeoutError("primary timed out")
         return {
-            "entry_date": entry_date.isoformat(),
+            "date": entry_date.isoformat(),
             "nutrition": [],
             "workout": None,
             "wellbeing": {
@@ -76,11 +81,12 @@ class FallbackOpenRouterClient(OpenRouterClient):
                 "stress": None,
                 "sleep_hours": None,
                 "sleep_quality": None,
+                "notes": None,
                 "confidence": 0.8,
             },
             "career": [],
-            "journal_text": None,
-            "missing_info_questions": [],
+            "journal": None,
+            "clarification_questions": [],
         }
 
 
@@ -96,8 +102,9 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertEqual(method, "llm")
         self.assertIsNone(error)
         self.assertEqual(parsed.entry_date.isoformat(), "2026-04-25")
-        self.assertEqual(parsed.nutrition[0].meal_name, "oatmeal with dates")
+        self.assertEqual(parsed.nutrition[0].description, "oatmeal with dates")
         self.assertEqual(parsed.workout.workout_type, "legs")
+        self.assertEqual(parsed.workout.exercises[0].name, "squat")
         self.assertEqual(parsed.career[0].project, "thesis")
 
     async def test_falls_back_when_llm_output_is_invalid(self) -> None:
@@ -122,3 +129,42 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertIsNone(error)
         self.assertEqual(client.models, ["primary-model", "fallback-model"])
         self.assertEqual(parsed.wellbeing.energy, 7)
+
+    async def test_llm_result_gets_followup_policy(self) -> None:
+        class VagueLLMClient:
+            async def extract(self, text: str, entry_date: date) -> dict[str, object]:
+                return {
+                    "date": entry_date.isoformat(),
+                    "nutrition": [
+                        {
+                            "meal_type": "dinner",
+                            "description": "chicken and fries",
+                            "calories": None,
+                            "protein_g": None,
+                            "carbs_g": None,
+                            "fat_g": None,
+                            "estimated": False,
+                            "confidence": 0.5,
+                        }
+                    ],
+                    "workout": {
+                        "workout_type": "strength",
+                        "duration_min": 90,
+                        "intensity": None,
+                        "notes": None,
+                        "exercises": [],
+                        "confidence": 0.8,
+                    },
+                    "wellbeing": None,
+                    "career": [],
+                    "journal": None,
+                    "clarification_questions": [],
+                }
+
+        service = ExtractionService(mode="llm", llm_client=VagueLLMClient())
+        parsed, method, error = await service.extract("vague", date(2026, 4, 25))
+
+        self.assertEqual(method, "llm")
+        self.assertIsNone(error)
+        self.assertLessEqual(len(parsed.clarification_questions), 2)
+        self.assertTrue(any("exercises" in q.lower() for q in parsed.clarification_questions))

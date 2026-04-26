@@ -49,6 +49,37 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertIn("Logged #1", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
+    async def test_confirmation_includes_bounded_followup_for_vague_log(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+                send_confirmations=True,
+            )
+
+            await service.handle_update(
+                {
+                    "message": {
+                        "date": 1777132800,
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": (
+                            "Had a tough day but still did a good workout for 90mins at the gym. "
+                            "I did legs and upper body. Dinner was chicken and fries."
+                        ),
+                    }
+                }
+            )
+
+            confirmation = client.sent[0][1]
+            self.assertIn("Questions:", confirmation)
+            self.assertIn("main exercises", confirmation)
+            self.assertIn("energy", confirmation.lower())
+
     async def test_rejects_user_outside_allowlist(self) -> None:
         with TemporaryDirectory() as directory:
             service = TelegramService(
@@ -91,3 +122,28 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "ignored_non_text_message")
 
+    async def test_ignores_non_logging_refusal_reply(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "i do not want to give more info",
+                    }
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "ignored_non_logging_reply")
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
+            self.assertIn("leave that log as-is", client.sent[0][1])

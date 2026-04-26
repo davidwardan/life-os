@@ -14,77 +14,172 @@ from backend.app.schemas import MessageIn, ParsedDailyLog
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_date TEXT NOT NULL,
+    entry_date TEXT,
     source TEXT NOT NULL,
-    text TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    text TEXT,
+    created_at TEXT,
+    received_at TEXT,
+    user_text TEXT,
+    processed INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS daily_checkins (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT,
+    entry_date TEXT,
+    sleep_hours REAL,
+    sleep_quality INTEGER,
+    energy INTEGER,
+    stress INTEGER,
+    mood INTEGER,
+    notes TEXT,
+    confidence REAL,
+    source_message_id INTEGER,
+    raw_message_id INTEGER,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
 );
 
 CREATE TABLE IF NOT EXISTS nutrition_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER NOT NULL,
-    entry_date TEXT NOT NULL,
-    meal_name TEXT NOT NULL,
+    raw_message_id INTEGER,
+    source_message_id INTEGER,
+    date TEXT,
+    entry_date TEXT,
+    meal_type TEXT,
+    meal_name TEXT,
+    description TEXT,
     calories REAL,
     protein_g REAL,
-    confidence REAL NOT NULL,
-    estimated INTEGER NOT NULL,
+    carbs_g REAL,
+    fat_g REAL,
+    confidence REAL,
+    estimated INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
 );
 
 CREATE TABLE IF NOT EXISTS workout_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER NOT NULL,
-    entry_date TEXT NOT NULL,
+    raw_message_id INTEGER,
+    source_message_id INTEGER,
+    date TEXT,
+    entry_date TEXT,
     workout_type TEXT,
     duration_min REAL,
     intensity INTEGER,
     notes TEXT,
-    confidence REAL NOT NULL,
+    confidence REAL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
+);
+
+CREATE TABLE IF NOT EXISTS workout_exercises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workout_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    sets INTEGER,
+    reps INTEGER,
+    load TEXT,
+    duration_min REAL,
+    notes TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(workout_id) REFERENCES workout_logs(id)
 );
 
 CREATE TABLE IF NOT EXISTS wellbeing_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER NOT NULL,
-    entry_date TEXT NOT NULL,
+    raw_message_id INTEGER,
+    entry_date TEXT,
     mood INTEGER,
     energy INTEGER,
     stress INTEGER,
     sleep_hours REAL,
     sleep_quality INTEGER,
-    confidence REAL NOT NULL,
+    confidence REAL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+    source_message_id INTEGER,
+    date TEXT,
+    notes TEXT
 );
 
 CREATE TABLE IF NOT EXISTS career_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER NOT NULL,
-    entry_date TEXT NOT NULL,
+    raw_message_id INTEGER,
+    source_message_id INTEGER,
+    date TEXT,
+    entry_date TEXT,
     project TEXT,
     activity TEXT,
     duration_hours REAL,
     progress_note TEXT,
     blockers TEXT,
-    confidence REAL NOT NULL,
+    confidence REAL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
 );
 
 CREATE TABLE IF NOT EXISTS journal_entries (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER NOT NULL,
-    entry_date TEXT NOT NULL,
+    raw_message_id INTEGER,
+    source_message_id INTEGER,
+    date TEXT,
+    entry_date TEXT,
     text TEXT NOT NULL,
     tags_json TEXT NOT NULL DEFAULT '[]',
     sentiment REAL,
     created_at TEXT NOT NULL,
-    FOREIGN KEY(raw_message_id) REFERENCES raw_messages(id)
+    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
 );
 """
+
+
+MIGRATIONS: dict[str, dict[str, str]] = {
+    "raw_messages": {
+        "entry_date": "TEXT",
+        "text": "TEXT",
+        "created_at": "TEXT",
+        "received_at": "TEXT",
+        "user_text": "TEXT",
+        "processed": "INTEGER NOT NULL DEFAULT 0",
+    },
+    "nutrition_logs": {
+        "raw_message_id": "INTEGER",
+        "source_message_id": "INTEGER",
+        "date": "TEXT",
+        "entry_date": "TEXT",
+        "meal_type": "TEXT",
+        "meal_name": "TEXT",
+        "description": "TEXT",
+        "carbs_g": "REAL",
+        "fat_g": "REAL",
+    },
+    "workout_logs": {
+        "raw_message_id": "INTEGER",
+        "source_message_id": "INTEGER",
+        "date": "TEXT",
+        "entry_date": "TEXT",
+        "confidence": "REAL",
+    },
+    "wellbeing_logs": {
+        "source_message_id": "INTEGER",
+        "date": "TEXT",
+        "notes": "TEXT",
+    },
+    "career_logs": {
+        "raw_message_id": "INTEGER",
+        "source_message_id": "INTEGER",
+        "date": "TEXT",
+        "entry_date": "TEXT",
+        "confidence": "REAL",
+    },
+    "journal_entries": {
+        "raw_message_id": "INTEGER",
+        "source_message_id": "INTEGER",
+        "date": "TEXT",
+        "entry_date": "TEXT",
+    },
+}
 
 
 class LifeDatabase:
@@ -106,39 +201,76 @@ class LifeDatabase:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
+            _run_migrations(connection)
 
     def save_message(self, message: MessageIn, parsed: ParsedDailyLog) -> dict[str, Any]:
         now = _now()
+        log_date = parsed.date.isoformat()
         with self.connect() as connection:
             raw_id = connection.execute(
                 """
-                INSERT INTO raw_messages (entry_date, source, text, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO raw_messages
+                (entry_date, source, text, created_at, received_at, user_text, processed)
+                VALUES (?, ?, ?, ?, ?, ?, 0)
                 """,
-                (parsed.entry_date.isoformat(), message.source, message.text, now),
+                (log_date, message.source, message.text, now, now, message.text),
             ).lastrowid
 
-            records = {
+            records: dict[str, list[dict[str, Any]]] = {
+                "daily_checkins": [],
                 "nutrition": [],
                 "workout": [],
-                "wellbeing": [],
+                "workout_exercises": [],
                 "career": [],
                 "journal": [],
             }
+
+            if parsed.wellbeing and _has_wellbeing_signal(parsed.wellbeing):
+                item = parsed.wellbeing
+                row_id = connection.execute(
+                    """
+                    INSERT INTO daily_checkins
+                    (date, entry_date, sleep_hours, sleep_quality, energy, stress, mood, notes,
+                     confidence, source_message_id, raw_message_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        log_date,
+                        log_date,
+                        item.sleep_hours,
+                        item.sleep_quality,
+                        item.energy,
+                        item.stress,
+                        item.mood,
+                        item.notes,
+                        item.confidence,
+                        raw_id,
+                        raw_id,
+                        now,
+                    ),
+                ).lastrowid
+                records["daily_checkins"].append({"id": row_id, **item.model_dump()})
 
             for item in parsed.nutrition:
                 row_id = connection.execute(
                     """
                     INSERT INTO nutrition_logs
-                    (raw_message_id, entry_date, meal_name, calories, protein_g, confidence, estimated, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (raw_message_id, source_message_id, date, entry_date, meal_type, meal_name,
+                     description, calories, protein_g, carbs_g, fat_g, confidence, estimated, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         raw_id,
-                        parsed.entry_date.isoformat(),
-                        item.meal_name,
+                        raw_id,
+                        log_date,
+                        log_date,
+                        item.meal_type,
+                        item.description,
+                        item.description,
                         item.calories,
                         item.protein_g,
+                        item.carbs_g,
+                        item.fat_g,
                         item.confidence,
                         int(item.estimated),
                         now,
@@ -148,15 +280,18 @@ class LifeDatabase:
 
             if parsed.workout:
                 item = parsed.workout
-                row_id = connection.execute(
+                workout_id = connection.execute(
                     """
                     INSERT INTO workout_logs
-                    (raw_message_id, entry_date, workout_type, duration_min, intensity, notes, confidence, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (raw_message_id, source_message_id, date, entry_date, workout_type, duration_min,
+                     intensity, notes, confidence, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         raw_id,
-                        parsed.entry_date.isoformat(),
+                        raw_id,
+                        log_date,
+                        log_date,
                         item.workout_type,
                         item.duration_min,
                         item.intensity,
@@ -165,40 +300,41 @@ class LifeDatabase:
                         now,
                     ),
                 ).lastrowid
-                records["workout"].append({"id": row_id, **item.model_dump()})
+                records["workout"].append({"id": workout_id, **item.model_dump()})
 
-            if parsed.wellbeing:
-                item = parsed.wellbeing
-                row_id = connection.execute(
-                    """
-                    INSERT INTO wellbeing_logs
-                    (raw_message_id, entry_date, mood, energy, stress, sleep_hours, sleep_quality, confidence, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        raw_id,
-                        parsed.entry_date.isoformat(),
-                        item.mood,
-                        item.energy,
-                        item.stress,
-                        item.sleep_hours,
-                        item.sleep_quality,
-                        item.confidence,
-                        now,
-                    ),
-                ).lastrowid
-                records["wellbeing"].append({"id": row_id, **item.model_dump()})
+                for exercise in item.exercises:
+                    exercise_id = connection.execute(
+                        """
+                        INSERT INTO workout_exercises
+                        (workout_id, name, sets, reps, load, duration_min, notes, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            workout_id,
+                            exercise.name,
+                            exercise.sets,
+                            exercise.reps,
+                            exercise.load,
+                            exercise.duration_min,
+                            exercise.notes,
+                            now,
+                        ),
+                    ).lastrowid
+                    records["workout_exercises"].append({"id": exercise_id, **exercise.model_dump()})
 
             for item in parsed.career:
                 row_id = connection.execute(
                     """
                     INSERT INTO career_logs
-                    (raw_message_id, entry_date, project, activity, duration_hours, progress_note, blockers, confidence, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (raw_message_id, source_message_id, date, entry_date, project, activity,
+                     duration_hours, progress_note, blockers, confidence, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         raw_id,
-                        parsed.entry_date.isoformat(),
+                        raw_id,
+                        log_date,
+                        log_date,
                         item.project,
                         item.activity,
                         item.duration_hours,
@@ -210,16 +346,28 @@ class LifeDatabase:
                 ).lastrowid
                 records["career"].append({"id": row_id, **item.model_dump()})
 
-            if parsed.journal_text:
+            if parsed.journal:
+                item = parsed.journal
                 row_id = connection.execute(
                     """
                     INSERT INTO journal_entries
-                    (raw_message_id, entry_date, text, tags_json, sentiment, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    (raw_message_id, source_message_id, date, entry_date, text, tags_json, sentiment, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (raw_id, parsed.entry_date.isoformat(), parsed.journal_text, json.dumps([]), None, now),
+                    (
+                        raw_id,
+                        raw_id,
+                        log_date,
+                        log_date,
+                        item.text,
+                        json.dumps(item.tags),
+                        item.sentiment,
+                        now,
+                    ),
                 ).lastrowid
-                records["journal"].append({"id": row_id, "text": parsed.journal_text})
+                records["journal"].append({"id": row_id, **item.model_dump()})
+
+            connection.execute("UPDATE raw_messages SET processed = 1 WHERE id = ?", (raw_id,))
 
         return {"raw_message_id": raw_id, "records": records}
 
@@ -228,7 +376,18 @@ class LifeDatabase:
             return {
                 "raw_messages": _rows(
                     connection,
-                    "SELECT * FROM raw_messages ORDER BY created_at DESC LIMIT ?",
+                    """
+                    SELECT id, source, COALESCE(received_at, created_at) AS received_at,
+                           COALESCE(user_text, text) AS user_text, processed, entry_date
+                    FROM raw_messages
+                    ORDER BY COALESCE(received_at, created_at) DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ),
+                "daily_checkins": _rows(
+                    connection,
+                    "SELECT * FROM daily_checkins ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 ),
                 "nutrition": _rows(
@@ -241,9 +400,9 @@ class LifeDatabase:
                     "SELECT * FROM workout_logs ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 ),
-                "wellbeing": _rows(
+                "workout_exercises": _rows(
                     connection,
-                    "SELECT * FROM wellbeing_logs ORDER BY created_at DESC LIMIT ?",
+                    "SELECT * FROM workout_exercises ORDER BY created_at DESC LIMIT ?",
                     (limit,),
                 ),
                 "career": _rows(
@@ -259,10 +418,73 @@ class LifeDatabase:
             }
 
 
+def _run_migrations(connection: sqlite3.Connection) -> None:
+    for table, columns in MIGRATIONS.items():
+        existing = _table_columns(connection, table)
+        for column, column_type in columns.items():
+            if column not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
+    connection.execute(
+        """
+        UPDATE raw_messages
+        SET received_at = COALESCE(received_at, created_at),
+            user_text = COALESCE(user_text, text),
+            processed = COALESCE(processed, 1)
+        """
+    )
+    connection.execute(
+        """
+        UPDATE nutrition_logs
+        SET date = COALESCE(date, entry_date),
+            source_message_id = COALESCE(source_message_id, raw_message_id),
+            description = COALESCE(description, meal_name)
+        """
+    )
+    connection.execute(
+        """
+        UPDATE workout_logs
+        SET date = COALESCE(date, entry_date),
+            source_message_id = COALESCE(source_message_id, raw_message_id)
+        """
+    )
+    connection.execute(
+        """
+        UPDATE career_logs
+        SET date = COALESCE(date, entry_date),
+            source_message_id = COALESCE(source_message_id, raw_message_id)
+        """
+    )
+    connection.execute(
+        """
+        UPDATE journal_entries
+        SET date = COALESCE(date, entry_date),
+            source_message_id = COALESCE(source_message_id, raw_message_id)
+        """
+    )
+
+
+def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _has_wellbeing_signal(item) -> bool:
+    return any(
+        value is not None
+        for value in (
+            item.sleep_hours,
+            item.sleep_quality,
+            item.energy,
+            item.stress,
+            item.mood,
+            item.notes,
+        )
+    )
+
+
 def _rows(connection: sqlite3.Connection, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     return [dict(row) for row in connection.execute(query, params).fetchall()]
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
-
