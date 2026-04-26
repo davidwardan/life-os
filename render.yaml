@@ -11,6 +11,8 @@ services:
     envVars:
       - key: LIFE_OS_TIMEZONE
         value: America/Toronto
+      - key: LIFE_OS_WEB_USERNAME
+        value: life-os
       - key: LIFE_OS_EXTRACTOR
         value: auto
       - key: LIFE_OS_LLM_TIMEOUT_SECONDS
@@ -26,6 +28,8 @@ services:
       - key: TURSO_SYNC_INTERVAL_SECONDS
         value: "60"
       - key: OPENROUTER_API_KEY
+        sync: false
+      - key: LIFE_OS_WEB_PASSWORD
         sync: false
       - key: TELEGRAM_BOT_TOKEN
         sync: false

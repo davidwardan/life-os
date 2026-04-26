@@ -4,6 +4,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.app.auth import require_web_auth
 from backend.app.briefing import BriefingService
 from backend.app.config import STATIC_DIR
 from backend.app.config import settings
@@ -16,6 +17,7 @@ from backend.app.telegram import make_telegram_service, verify_telegram_secret
 
 
 app = FastAPI(title="Life OS", version="0.1.0")
+app.middleware("http")(require_web_auth)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 db = LifeDatabase()
 extractor = ExtractionService()
@@ -72,6 +74,26 @@ async def create_message(message: MessageIn) -> LoggedMessage:
 def list_logs(limit: int = 25) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     return {"logs": db.recent_logs(bounded_limit)}
+
+
+@app.get("/api/logs/deletable")
+def list_deletable_logs(limit: int = 25, kind: str | None = None) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    try:
+        return {"logs": db.deletable_logs(limit=bounded_limit, kind=kind)}
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.delete("/api/logs/{kind}/{record_id}")
+def delete_log(kind: str, record_id: int) -> dict[str, object]:
+    try:
+        result = db.delete_log(kind, record_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    if not result["deleted"]:
+        raise HTTPException(status_code=404, detail=f"{kind} #{record_id} was not found")
+    return result
 
 
 @app.post("/api/plots")
@@ -171,4 +193,5 @@ async def telegram_webhook(
         "plot_path": result.plot_path,
         "briefing_method": result.briefing_method,
         "briefing_error": result.briefing_error,
+        "deleted_log": result.deleted_log,
     }

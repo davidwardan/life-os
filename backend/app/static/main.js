@@ -40,6 +40,36 @@ submit.addEventListener("click", async () => {
 });
 
 refresh.addEventListener("click", loadLogs);
+records.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-kind]");
+  if (!button) {
+    return;
+  }
+  const kind = button.dataset.deleteKind;
+  const id = button.dataset.deleteId;
+  const label = button.dataset.deleteLabel || `${kind} #${id}`;
+  if (!window.confirm(`Delete ${label}?`)) {
+    return;
+  }
+
+  setStatus("Deleting");
+  const response = await fetch(`/api/logs/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!response.ok) {
+    setStatus("Delete error");
+    parsed.textContent = await response.text();
+    return;
+  }
+  const payload = await response.json();
+  parsed.innerHTML = recordBlock("Deleted", {
+    kind: payload.kind,
+    id: payload.id,
+    summary: payload.summary,
+  });
+  await loadLogs();
+  setStatus("Deleted");
+});
 
 loadLogs();
 loadExtractionStatus();
@@ -126,9 +156,18 @@ function renderRecords(logs) {
       <div class="record">
         <div class="record-title">
           <span>${escapeHtml(title)}</span>
-          <span class="record-meta">${escapeHtml(item.entry_date || "")}</span>
+          <span class="record-meta">${escapeHtml(item.entry_date || item.date || "")}</span>
         </div>
         ${fields(item)}
+        <div class="record-actions">
+          <button
+            type="button"
+            class="ghost danger"
+            data-delete-kind="${escapeHtml(kind)}"
+            data-delete-id="${escapeHtml(String(item.id))}"
+            data-delete-label="${escapeHtml(`${title} #${item.id}`)}"
+          >Delete</button>
+        </div>
       </div>
     `;
   }).join("");

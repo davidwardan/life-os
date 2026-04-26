@@ -209,6 +209,21 @@ button.ghost:hover {
   font-size: 0.86rem;
 }
 
+.record-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+button.danger {
+  color: var(--accent);
+}
+
+button.danger:hover {
+  color: var(--panel);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 .fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -270,4 +285,3 @@ button.ghost:hover {
     grid-template-columns: 1fr;
   }
 }
-

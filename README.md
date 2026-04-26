@@ -41,6 +41,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Structured logs for wellbeing, nutrition, workouts, exercises, career, and journal entries
 - Context-aware logging that fills missing workout details from recent matching exercises
 - Same-day structured duplicate prevention
+- Controlled log deletion from the web app or Telegram
 - Long-term memory for explicit preferences, strategies, goals, and briefing style
 - OpenRouter-backed LLM extraction with deterministic fallback
 - Telegram webhook with user allowlist and webhook secret support
@@ -99,6 +100,8 @@ Create a local `.env` file. It is ignored by git.
 ```text
 LIFE_OS_EXTRACTOR=auto
 LIFE_OS_TIMEZONE=America/Toronto
+LIFE_OS_WEB_USERNAME=life-os
+LIFE_OS_WEB_PASSWORD=
 
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
@@ -115,6 +118,8 @@ BRIEFING_CRON_SECRET=
 TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
+
+Set `LIFE_OS_WEB_PASSWORD` in production. When it is present, the dashboard and normal API routes require Basic Auth. `/health` stays open for Render health checks, and `/api/telegram/webhook` stays open to Telegram but remains protected by `TELEGRAM_WEBHOOK_SECRET`.
 
 For local Telegram testing with ngrok:
 
@@ -137,6 +142,15 @@ Teach the assistant durable preferences:
 remember that briefings should be direct and concise
 remember that training early works for me
 remember that I don't like vague motivational advice
+```
+
+Delete mistakes without touching the database directly:
+
+```text
+delete logs
+delete meal #12
+delete last workout
+delete today's journal
 ```
 
 ## Data Model

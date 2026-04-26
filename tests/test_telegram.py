@@ -333,3 +333,110 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "memory_updated")
             self.assertIn("Memory updated", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
+
+    async def test_delete_request_lists_recent_logs_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Dinner was chicken and fries.",
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log("Dinner was chicken and fries.", date(2026, 4, 25)),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "delete logs",
+                    }
+                }
+            )
+
+            self.assertEqual(result.status, "delete_options_sent")
+            self.assertIn("Recent deletable logs", client.sent[0][1])
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_delete_request_deletes_by_kind_and_id_without_logging_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Dinner was chicken and fries.",
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log("Dinner was chicken and fries.", date(2026, 4, 25)),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "delete meal #1",
+                    }
+                }
+            )
+
+            self.assertEqual(result.status, "deleted")
+            self.assertIn("Deleted nutrition", client.sent[0][1])
+            self.assertEqual(len(db.recent_logs()["nutrition"]), 0)
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_delete_last_log_cascades_raw_message_records(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Ate eggs. I did squats 3 sets of 10 reps 100 kg.",
+                    entry_date=date(2026, 4, 25),
+                    source="telegram",
+                ),
+                extract_daily_log(
+                    "Ate eggs. I did squats 3 sets of 10 reps 100 kg.",
+                    date(2026, 4, 25),
+                ),
+            )
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "text": "delete last log",
+                    }
+                }
+            )
+
+            self.assertEqual(result.status, "deleted")
+            self.assertIn("Deleted raw messages", client.sent[0][1])
+            logs = db.recent_logs()
+            self.assertEqual(len(logs["raw_messages"]), 0)
+            self.assertEqual(len(logs["nutrition"]), 0)
+            self.assertEqual(len(logs["workout"]), 0)
+            self.assertEqual(len(logs["workout_exercises"]), 0)

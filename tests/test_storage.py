@@ -132,3 +132,57 @@ class StorageTests(TestCase):
 
             self.assertEqual(second["records"]["nutrition"], [])
             self.assertEqual(len(logs["nutrition"]), 1)
+
+    def test_deletes_single_structured_log(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="Dinner was chicken and fries.",
+                entry_date=date(2026, 4, 25),
+                source="telegram",
+            )
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+
+            deleted = db.delete_log("nutrition", 1)
+            logs = db.recent_logs()
+
+            self.assertTrue(deleted["deleted"])
+            self.assertEqual(deleted["kind"], "nutrition")
+            self.assertEqual(len(logs["nutrition"]), 0)
+            self.assertEqual(len(logs["raw_messages"]), 1)
+
+    def test_deletes_raw_log_and_associated_records(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="Ate eggs. I did squats 3 sets of 10 reps 100 kg. Energy 7.",
+                entry_date=date(2026, 4, 25),
+                source="telegram",
+            )
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+
+            deleted = db.delete_log("log", 1)
+            logs = db.recent_logs()
+
+            self.assertTrue(deleted["deleted"])
+            self.assertEqual(len(logs["raw_messages"]), 0)
+            self.assertEqual(len(logs["nutrition"]), 0)
+            self.assertEqual(len(logs["workout"]), 0)
+            self.assertEqual(len(logs["workout_exercises"]), 0)
+            self.assertEqual(len(logs["daily_checkins"]), 0)
+
+    def test_lists_deletable_logs(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="Worked 2h on Life OS.",
+                entry_date=date(2026, 4, 25),
+                source="web",
+            )
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+
+            candidates = db.deletable_logs(limit=5)
+
+            self.assertTrue(any(item["kind"] == "raw_messages" for item in candidates))
+            self.assertTrue(any(item["kind"] == "career" for item in candidates))
+            self.assertTrue(all("summary" in item for item in candidates))

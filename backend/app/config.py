@@ -19,6 +19,8 @@ def _split_csv(value: str) -> tuple[str, ...]:
 
 class Settings:
     timezone: str = getenv("LIFE_OS_TIMEZONE", "America/Toronto")
+    web_username: str = getenv("LIFE_OS_WEB_USERNAME", "life-os")
+    web_password: str | None = getenv("LIFE_OS_WEB_PASSWORD")
     extractor: str = getenv("LIFE_OS_EXTRACTOR", "deterministic").lower()
     openrouter_api_key: str | None = getenv("OPENROUTER_API_KEY")
     openrouter_base_url: str = getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")

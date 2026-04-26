@@ -11,6 +11,7 @@ import httpx
 from backend.app.briefing import BriefingService, is_briefing_request
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
+from backend.app.deletion import handle_delete_request, is_delete_request
 from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService, is_memory_request
@@ -65,6 +66,7 @@ class TelegramResult:
     plot_paths: tuple[str, ...] = ()
     briefing_method: str | None = None
     briefing_error: str | None = None
+    deleted_log: dict[str, Any] | None = None
 
 
 class TelegramService:
@@ -136,6 +138,21 @@ class TelegramService:
             if self.client and self.send_confirmations:
                 await self.client.send_message(chat_id, confirmation)
             return TelegramResult(ok=True, status="memory_updated", confirmation=confirmation)
+
+        if is_delete_request(text):
+            deletion = handle_delete_request(
+                self.db,
+                text,
+                entry_date=_telegram_entry_date(message.get("date")),
+            )
+            if self.client and self.send_confirmations:
+                await self.client.send_message(chat_id, deletion.confirmation)
+            return TelegramResult(
+                ok=deletion.ok,
+                status=deletion.status,
+                confirmation=deletion.confirmation,
+                deleted_log=deletion.deleted,
+            )
 
         if is_briefing_request(text):
             briefing = await self.briefing_service.generate(_telegram_entry_date(message.get("date")))

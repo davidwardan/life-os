@@ -80,6 +80,20 @@ Duplicate same-day structured rows are skipped. The raw message is still preserv
 
 For nutrition, explicitly provided calories are preferred. If calories are missing, Life OS may estimate a normal portion conservatively and ask whether you want to replace the estimate with actual calories.
 
+## Deleting Logs
+
+From Telegram:
+
+```text
+delete logs
+delete meal #12
+delete workout #4
+delete last log
+delete today's journal
+```
+
+`delete logs` lists recent candidates with IDs. Deleting a raw log removes the raw message and its structured children. Deleting a single structured record, such as a meal or workout, leaves the original raw message intact.
+
 ## Telegram Plot Commands
 
 Single plot:
