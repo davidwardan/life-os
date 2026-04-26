@@ -155,6 +155,13 @@ ON memory_items(category, subject, value);
 
 CREATE INDEX IF NOT EXISTS idx_memory_items_active_category
 ON memory_items(active, category);
+
+CREATE TABLE IF NOT EXISTS telegram_updates (
+    update_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -216,6 +223,12 @@ MIGRATIONS: dict[str, dict[str, str]] = {
         "created_at": "TEXT",
         "updated_at": "TEXT",
         "last_seen_at": "TEXT",
+    },
+    "telegram_updates": {
+        "update_id": "INTEGER",
+        "status": "TEXT",
+        "created_at": "TEXT",
+        "updated_at": "TEXT",
     },
 }
 

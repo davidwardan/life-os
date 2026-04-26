@@ -281,6 +281,33 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertIn("Morning brief", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
+    async def test_duplicate_update_id_is_ignored_without_resending(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+            )
+            update = {
+                "update_id": 999,
+                "message": {
+                    "date": 1777132800,
+                    "from": {"id": 123},
+                    "chat": {"id": 456},
+                    "text": "morning brief",
+                },
+            }
+
+            first = await service.handle_update(update)
+            second = await service.handle_update(update)
+
+            self.assertEqual(first.status, "briefing_sent")
+            self.assertEqual(second.status, "ignored_duplicate_update")
+            self.assertEqual(len(client.sent), 1)
+
     async def test_memory_request_updates_memory_without_logging_message(self) -> None:
         with TemporaryDirectory() as directory:
             db = LifeDatabase(Path(directory) / "life.sqlite3")

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+import sqlite3
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
@@ -88,6 +89,20 @@ class TelegramService:
         self.send_confirmations = send_confirmations
 
     async def handle_update(self, update: dict[str, Any]) -> TelegramResult:
+        update_id = update.get("update_id")
+        if isinstance(update_id, int) and not self._reserve_update(update_id):
+            return TelegramResult(ok=True, status="ignored_duplicate_update")
+
+        result_status = "processing"
+        try:
+            result = await self._handle_reserved_update(update)
+            result_status = result.status
+            return result
+        finally:
+            if isinstance(update_id, int):
+                self._finish_update(update_id, result_status)
+
+    async def _handle_reserved_update(self, update: dict[str, Any]) -> TelegramResult:
         message = update.get("message") or update.get("edited_message")
         if not isinstance(message, dict):
             return TelegramResult(ok=True, status="ignored_non_message_update")
@@ -177,6 +192,35 @@ class TelegramService:
             extraction_error=error,
         )
 
+    def _reserve_update(self, update_id: int) -> bool:
+        now = _now()
+        try:
+            with self.db.connect() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO telegram_updates (update_id, status, created_at, updated_at)
+                    VALUES (?, 'processing', ?, ?)
+                    """,
+                    (update_id, now, now),
+                )
+            return True
+        except Exception as error:
+            if _is_unique_error(error):
+                return False
+            raise
+
+    def _finish_update(self, update_id: int, status: str) -> None:
+        now = _now()
+        with self.db.connect() as connection:
+            connection.execute(
+                """
+                UPDATE telegram_updates
+                SET status = ?, updated_at = ?
+                WHERE update_id = ?
+                """,
+                (status, now, update_id),
+            )
+
 
 def make_telegram_service(db: LifeDatabase, extractor: ExtractionService) -> TelegramService:
     client = TelegramBotClient(settings.telegram_bot_token) if settings.telegram_bot_token else None
@@ -199,6 +243,15 @@ def _telegram_entry_date(timestamp: Any):
     if not isinstance(timestamp, int):
         return None
     return datetime.fromtimestamp(timestamp, ZoneInfo(settings.timezone)).date()
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _is_unique_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return isinstance(error, sqlite3.IntegrityError) or "unique" in message or "constraint" in message
 
 
 def _confirmation(raw_message_id: int, parsed, method: str, error: str | None) -> str:
