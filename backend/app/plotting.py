@@ -450,9 +450,17 @@ class PlotService:
         _save(fig, path)
         return PlotResult(path=path, title=title, detail=f"{len(rows)} day(s)")
 
-    def _rows(self, query: str, params: tuple[str, ...]) -> list[sqlite3.Row]:
+    def _rows(self, query: str, params: tuple[str, ...]) -> list[dict[str, Any]]:
         with self.db.connect() as connection:
-            return connection.execute(query, params).fetchall()
+            cursor = connection.execute(query, params)
+            rows = cursor.fetchall()
+            if not rows:
+                return []
+            if isinstance(rows[0], sqlite3.Row):
+                return [dict(row) for row in rows]
+
+            columns = [column[0] for column in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
 
     def _path(self, name: str) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")

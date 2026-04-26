@@ -82,6 +82,10 @@ Run tests:
 python -m unittest discover -s tests
 ```
 
+## Deploy
+
+For a free cloud deployment with automatic deploys from `main`, use Koyeb for the FastAPI service and Turso for persistent SQLite-compatible storage. See [Deployment](docs/DEPLOYMENT.md).
+
 ## Configuration
 
 Create a local `.env` file. It is ignored by git.
@@ -99,6 +103,9 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_SEND_CONFIRMATIONS=true
+
+TURSO_DATABASE_URL=
+TURSO_AUTH_TOKEN=
 ```
 
 For local Telegram testing with ngrok:
@@ -128,6 +135,7 @@ Structured rows point back to `source_message_id`, so every chart and future bri
 ## Documentation
 
 - [Examples](docs/EXAMPLES.md)
+- [Deployment](docs/DEPLOYMENT.md)
 - [Roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)

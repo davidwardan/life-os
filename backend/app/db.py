@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from backend.app.config import DEFAULT_DB_PATH
+from backend.app.config import settings
 from backend.app.schemas import MessageIn, ParsedDailyLog
 
 
@@ -184,17 +185,22 @@ MIGRATIONS: dict[str, dict[str, str]] = {
 
 class LifeDatabase:
     def __init__(self, path: Path = DEFAULT_DB_PATH):
-        self.path = path
+        self.path = settings.turso_replica_path if _use_turso() else path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.initialize()
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path)
-        connection.row_factory = sqlite3.Row
+    def connect(self) -> Iterator[Any]:
+        connection = _connect(self.path)
+        if hasattr(connection, "row_factory"):
+            connection.row_factory = sqlite3.Row
         try:
+            if hasattr(connection, "sync"):
+                connection.sync()
             yield connection
             connection.commit()
+            if hasattr(connection, "sync"):
+                connection.sync()
         finally:
             connection.close()
 
@@ -465,7 +471,7 @@ def _run_migrations(connection: sqlite3.Connection) -> None:
 
 
 def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
-    return {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+    return {row["name"] for row in _query_rows(connection, f"PRAGMA table_info({table})", ())}
 
 
 def _has_wellbeing_signal(item) -> bool:
@@ -483,8 +489,45 @@ def _has_wellbeing_signal(item) -> bool:
 
 
 def _rows(connection: sqlite3.Connection, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    return [dict(row) for row in connection.execute(query, params).fetchall()]
+    return _query_rows(connection, query, params)
+
+
+def _query_rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+    cursor = connection.execute(query, params)
+    rows = cursor.fetchall()
+    if not rows:
+        return []
+    if isinstance(rows[0], sqlite3.Row):
+        return [dict(row) for row in rows]
+
+    columns = [column[0] for column in cursor.description]
+    return [dict(zip(columns, row)) for row in rows]
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _use_turso() -> bool:
+    return bool(settings.turso_database_url and settings.turso_auth_token)
+
+
+def _connect(path: Path) -> Any:
+    if not _use_turso():
+        return sqlite3.connect(path)
+
+    try:
+        import libsql
+    except ImportError as exc:
+        raise RuntimeError(
+            "TURSO_DATABASE_URL and TURSO_AUTH_TOKEN are set, but the libsql package is not "
+            "installed. Run `pip install -e .` after installing dependencies."
+        ) from exc
+
+    kwargs: dict[str, Any] = {
+        "sync_url": settings.turso_database_url,
+        "auth_token": settings.turso_auth_token,
+    }
+    if settings.turso_sync_interval_seconds:
+        kwargs["sync_interval"] = settings.turso_sync_interval_seconds
+    return libsql.connect(str(path), **kwargs)

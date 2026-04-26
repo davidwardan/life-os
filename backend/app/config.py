@@ -9,6 +9,7 @@ load_dotenv(ROOT_DIR / ".env")
 
 DATA_DIR = ROOT_DIR / "data"
 DEFAULT_DB_PATH = DATA_DIR / "life.sqlite3"
+TURSO_REPLICA_PATH = DATA_DIR / "turso-replica.sqlite3"
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -41,6 +42,12 @@ class Settings:
         "true",
         "yes",
     }
+    turso_database_url: str | None = getenv("TURSO_DATABASE_URL")
+    turso_auth_token: str | None = getenv("TURSO_AUTH_TOKEN")
+    turso_replica_path: Path = Path(getenv("TURSO_REPLICA_PATH", str(TURSO_REPLICA_PATH)))
+    turso_sync_interval_seconds: int | None = (
+        int(value) if (value := getenv("TURSO_SYNC_INTERVAL_SECONDS")) else None
+    )
 
 
 settings = Settings()
