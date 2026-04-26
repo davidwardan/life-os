@@ -271,6 +271,7 @@ class LifeDatabase:
                 """,
                 (log_date, message.source, message.text, now, now, message.text),
             ).lastrowid
+            _enrich_from_history(connection, parsed, log_date)
 
             records: dict[str, list[dict[str, Any]]] = {
                 "daily_checkins": [],
@@ -283,31 +284,34 @@ class LifeDatabase:
 
             if parsed.wellbeing and _has_wellbeing_signal(parsed.wellbeing):
                 item = parsed.wellbeing
-                row_id = connection.execute(
-                    """
-                    INSERT INTO daily_checkins
-                    (date, entry_date, sleep_hours, sleep_quality, energy, stress, mood, notes,
-                     confidence, source_message_id, raw_message_id, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        log_date,
-                        log_date,
-                        item.sleep_hours,
-                        item.sleep_quality,
-                        item.energy,
-                        item.stress,
-                        item.mood,
-                        item.notes,
-                        item.confidence,
-                        raw_id,
-                        raw_id,
-                        now,
-                    ),
-                ).lastrowid
-                records["daily_checkins"].append({"id": row_id, **item.model_dump()})
+                if not _duplicate_daily_checkin(connection, log_date, item):
+                    row_id = connection.execute(
+                        """
+                        INSERT INTO daily_checkins
+                        (date, entry_date, sleep_hours, sleep_quality, energy, stress, mood, notes,
+                         confidence, source_message_id, raw_message_id, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            log_date,
+                            log_date,
+                            item.sleep_hours,
+                            item.sleep_quality,
+                            item.energy,
+                            item.stress,
+                            item.mood,
+                            item.notes,
+                            item.confidence,
+                            raw_id,
+                            raw_id,
+                            now,
+                        ),
+                    ).lastrowid
+                    records["daily_checkins"].append({"id": row_id, **item.model_dump()})
 
             for item in parsed.nutrition:
+                if _duplicate_nutrition(connection, log_date, item):
+                    continue
                 row_id = connection.execute(
                     """
                     INSERT INTO nutrition_logs
@@ -336,30 +340,41 @@ class LifeDatabase:
 
             if parsed.workout:
                 item = parsed.workout
-                workout_id = connection.execute(
-                    """
-                    INSERT INTO workout_logs
-                    (raw_message_id, source_message_id, date, entry_date, workout_type, duration_min,
-                     intensity, notes, confidence, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        raw_id,
-                        raw_id,
-                        log_date,
-                        log_date,
-                        item.workout_type,
-                        item.duration_min,
-                        item.intensity,
-                        item.notes,
-                        item.confidence,
-                        now,
-                    ),
-                ).lastrowid
-                records["workout"].append({"id": workout_id, **item.model_dump()})
+                exercises_to_insert = [
+                    exercise
+                    for exercise in item.exercises
+                    if not _duplicate_exercise(connection, log_date, exercise)
+                ]
+                if item.exercises and not exercises_to_insert:
+                    item = None
+                elif not item.exercises and _duplicate_workout(connection, log_date, item):
+                    item = None
 
-                for exercise in item.exercises:
-                    exercise_id = connection.execute(
+                if item:
+                    workout_id = connection.execute(
+                        """
+                        INSERT INTO workout_logs
+                        (raw_message_id, source_message_id, date, entry_date, workout_type, duration_min,
+                         intensity, notes, confidence, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            raw_id,
+                            raw_id,
+                            log_date,
+                            log_date,
+                            item.workout_type,
+                            item.duration_min,
+                            item.intensity,
+                            item.notes,
+                            item.confidence,
+                            now,
+                        ),
+                    ).lastrowid
+                    records["workout"].append({"id": workout_id, **item.model_dump()})
+
+                    for exercise in exercises_to_insert:
+                        exercise_id = connection.execute(
                         """
                         INSERT INTO workout_exercises
                         (workout_id, name, sets, reps, load, duration_min, notes, created_at)
@@ -375,10 +390,12 @@ class LifeDatabase:
                             exercise.notes,
                             now,
                         ),
-                    ).lastrowid
-                    records["workout_exercises"].append({"id": exercise_id, **exercise.model_dump()})
+                        ).lastrowid
+                        records["workout_exercises"].append({"id": exercise_id, **exercise.model_dump()})
 
             for item in parsed.career:
+                if _duplicate_career(connection, log_date, item):
+                    continue
                 row_id = connection.execute(
                     """
                     INSERT INTO career_logs
@@ -404,24 +421,25 @@ class LifeDatabase:
 
             if parsed.journal:
                 item = parsed.journal
-                row_id = connection.execute(
-                    """
-                    INSERT INTO journal_entries
-                    (raw_message_id, source_message_id, date, entry_date, text, tags_json, sentiment, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        raw_id,
-                        raw_id,
-                        log_date,
-                        log_date,
-                        item.text,
-                        json.dumps(item.tags),
-                        item.sentiment,
-                        now,
-                    ),
-                ).lastrowid
-                records["journal"].append({"id": row_id, **item.model_dump()})
+                if not _duplicate_journal(connection, log_date, item):
+                    row_id = connection.execute(
+                        """
+                        INSERT INTO journal_entries
+                        (raw_message_id, source_message_id, date, entry_date, text, tags_json, sentiment, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            raw_id,
+                            raw_id,
+                            log_date,
+                            log_date,
+                            item.text,
+                            json.dumps(item.tags),
+                            item.sentiment,
+                            now,
+                        ),
+                    ).lastrowid
+                    records["journal"].append({"id": row_id, **item.model_dump()})
 
             connection.execute("UPDATE raw_messages SET processed = 1 WHERE id = ?", (raw_id,))
 
@@ -536,6 +554,132 @@ def _has_wellbeing_signal(item) -> bool:
             item.notes,
         )
     )
+
+
+def _enrich_from_history(connection: Any, parsed: ParsedDailyLog, log_date: str) -> None:
+    if not parsed.workout:
+        return
+    for exercise in parsed.workout.exercises:
+        previous = _rows(
+            connection,
+            """
+            SELECT e.sets, e.reps, e.load, e.duration_min
+            FROM workout_exercises e
+            JOIN workout_logs w ON w.id = e.workout_id
+            WHERE LOWER(e.name) = LOWER(?) AND w.date < ?
+            ORDER BY w.date DESC, e.created_at DESC
+            LIMIT 1
+            """,
+            (exercise.name, log_date),
+        )
+        if not previous:
+            continue
+        row = previous[0]
+        if exercise.sets is None:
+            exercise.sets = row["sets"]
+        if exercise.reps is None:
+            exercise.reps = row["reps"]
+        if exercise.load is None:
+            exercise.load = row["load"]
+        if exercise.duration_min is None:
+            exercise.duration_min = row["duration_min"]
+
+
+def _duplicate_daily_checkin(connection: Any, log_date: str, item: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1 FROM daily_checkins
+        WHERE date = ?
+          AND sleep_hours IS ?
+          AND sleep_quality IS ?
+          AND energy IS ?
+          AND stress IS ?
+          AND mood IS ?
+          AND COALESCE(notes, '') = COALESCE(?, '')
+        LIMIT 1
+        """,
+        (log_date, item.sleep_hours, item.sleep_quality, item.energy, item.stress, item.mood, item.notes),
+    )
+
+
+def _duplicate_nutrition(connection: Any, log_date: str, item: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1 FROM nutrition_logs
+        WHERE date = ?
+          AND COALESCE(meal_type, '') = COALESCE(?, '')
+          AND LOWER(COALESCE(description, meal_name, '')) = LOWER(?)
+        LIMIT 1
+        """,
+        (log_date, item.meal_type, item.description),
+    )
+
+
+def _duplicate_workout(connection: Any, log_date: str, item: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1 FROM workout_logs
+        WHERE date = ?
+          AND COALESCE(workout_type, '') = COALESCE(?, '')
+          AND duration_min IS ?
+          AND intensity IS ?
+        LIMIT 1
+        """,
+        (log_date, item.workout_type, item.duration_min, item.intensity),
+    )
+
+
+def _duplicate_exercise(connection: Any, log_date: str, exercise: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1
+        FROM workout_exercises e
+        JOIN workout_logs w ON w.id = e.workout_id
+        WHERE w.date = ?
+          AND LOWER(e.name) = LOWER(?)
+          AND e.sets IS ?
+          AND e.reps IS ?
+          AND COALESCE(e.load, '') = COALESCE(?, '')
+          AND e.duration_min IS ?
+        LIMIT 1
+        """,
+        (log_date, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.duration_min),
+    )
+
+
+def _duplicate_career(connection: Any, log_date: str, item: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1 FROM career_logs
+        WHERE date = ?
+          AND COALESCE(project, '') = COALESCE(?, '')
+          AND duration_hours IS ?
+          AND COALESCE(progress_note, '') = COALESCE(?, '')
+        LIMIT 1
+        """,
+        (log_date, item.project, item.duration_hours, item.progress_note),
+    )
+
+
+def _duplicate_journal(connection: Any, log_date: str, item: Any) -> bool:
+    return _exists(
+        connection,
+        """
+        SELECT 1 FROM journal_entries
+        WHERE date = ? AND text = ?
+        LIMIT 1
+        """,
+        (log_date, item.text),
+    )
+
+
+def _exists(connection: Any, query: str, params: tuple[Any, ...]) -> bool:
+    return bool(_rows(connection, query, params))
 
 
 def _rows(connection: sqlite3.Connection, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:

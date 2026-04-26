@@ -74,3 +74,61 @@ class StorageTests(TestCase):
 
             self.assertEqual(len(logs["daily_checkins"]), 0)
             self.assertEqual(len(logs["nutrition"]), 1)
+
+    def test_fills_missing_exercise_fields_from_recent_matching_workout(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            first = MessageIn(
+                text="I did squats 3 sets of 10 reps 100 kg.",
+                entry_date=date(2026, 4, 24),
+                source="telegram",
+            )
+            db.save_message(first, extract_daily_log(first.text, first.entry_date))
+            second = MessageIn(
+                text="I did squats.",
+                entry_date=date(2026, 4, 25),
+                source="telegram",
+            )
+
+            db.save_message(second, extract_daily_log(second.text, second.entry_date))
+            logs = db.recent_logs()
+
+            latest_squat = logs["workout_exercises"][0]
+            self.assertEqual(latest_squat["name"], "squat")
+            self.assertEqual(latest_squat["sets"], 3)
+            self.assertEqual(latest_squat["reps"], 10)
+            self.assertEqual(latest_squat["load"], "100 kg")
+
+    def test_skips_duplicate_same_day_structured_workout(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="I did squats 3 sets of 10 reps 100 kg.",
+                entry_date=date(2026, 4, 25),
+                source="telegram",
+            )
+
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+            second = db.save_message(message, extract_daily_log(message.text, message.entry_date))
+            logs = db.recent_logs()
+
+            self.assertEqual(len(logs["raw_messages"]), 2)
+            self.assertEqual(second["records"]["workout"], [])
+            self.assertEqual(second["records"]["workout_exercises"], [])
+            self.assertEqual(len(logs["workout_exercises"]), 1)
+
+    def test_skips_duplicate_same_day_nutrition(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="Dinner was chicken and fries.",
+                entry_date=date(2026, 4, 25),
+                source="telegram",
+            )
+
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+            second = db.save_message(message, extract_daily_log(message.text, message.entry_date))
+            logs = db.recent_logs()
+
+            self.assertEqual(second["records"]["nutrition"], [])
+            self.assertEqual(len(logs["nutrition"]), 1)

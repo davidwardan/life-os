@@ -20,6 +20,9 @@ def build_followup_questions(parsed: ParsedDailyLog) -> list[str]:
     if parsed.nutrition and any(item.confidence < 0.6 for item in parsed.nutrition):
         questions.append("Want to clarify the meal details or portions?")
 
+    if parsed.nutrition and any(item.estimated and item.calories is not None for item in parsed.nutrition):
+        questions.append("Want to replace the estimated calories with actual calories for any meal?")
+
     questions.extend(parsed.clarification_questions)
 
     return _dedupe(questions)[:2]

@@ -39,6 +39,8 @@ If you send those four lines together, Life OS returns four separate chart image
 - Local SQLite source of truth
 - Raw message archive for every logged note
 - Structured logs for wellbeing, nutrition, workouts, exercises, career, and journal entries
+- Context-aware logging that fills missing workout details from recent matching exercises
+- Same-day structured duplicate prevention
 - Long-term memory for explicit preferences, strategies, goals, and briefing style
 - OpenRouter-backed LLM extraction with deterministic fallback
 - Telegram webhook with user allowlist and webhook secret support

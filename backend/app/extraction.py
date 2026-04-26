@@ -106,12 +106,14 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
     if breakfast:
         breakfast = re.sub(r"\s+in the morning$", "", breakfast, flags=re.I).strip(" .")
         if _looks_like_food(breakfast):
+            calories = _estimate_calories(breakfast)
             entries.append(
                 NutritionEntry(
                     meal_type="breakfast" if "morning" in lower or "breakfast" in lower else None,
                     description=breakfast,
-                    estimated=False,
-                    confidence=0.72,
+                    calories=calories,
+                    estimated=calories is not None,
+                    confidence=0.72 if calories is None else 0.62,
                 )
             )
 
@@ -123,12 +125,14 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
     if lunch_match:
         description = lunch_match.group(1).strip(" .")
         protein_g = 55.0 if re.search(r"180\s*g\s+cooked\s+chicken", description, flags=re.I) else None
+        calories = _estimate_calories(description)
         entries.append(
             NutritionEntry(
                 meal_type="lunch",
                 description=description,
+                calories=calories,
                 protein_g=protein_g,
-                estimated=protein_g is not None,
+                estimated=protein_g is not None or calories is not None,
                 confidence=0.75 if protein_g is not None else 0.7,
             )
         )
@@ -139,12 +143,15 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
         flags=re.I,
     )
     if dinner_match:
+        description = dinner_match.group(1).strip(" .")
+        calories = _estimate_calories(description)
         return [
             NutritionEntry(
                 meal_type="dinner",
-                description=dinner_match.group(1).strip(" ."),
-                estimated=False,
-                confidence=0.7,
+                description=description,
+                calories=calories,
+                estimated=calories is not None,
+                confidence=0.7 if calories is None else 0.62,
             )
         ]
         entries.extend(dinner_entries)
@@ -173,13 +180,14 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
         parts = [meal_text or text]
 
     for index, part in enumerate(parts):
+        calories = float(calorie_match.group(1)) if calorie_match and index == 0 else _estimate_calories(part)
         entries.append(
             NutritionEntry(
                 meal_type=None,
                 description=part,
-                calories=float(calorie_match.group(1)) if calorie_match and index == 0 else None,
+                calories=calories,
                 protein_g=float(protein_match.group(1)) if protein_match and index == 0 else None,
-                estimated=False,
+                estimated=not bool(calorie_match and index == 0) and calories is not None,
                 confidence=0.74 if calorie_match or protein_match else 0.58,
             )
         )
@@ -247,27 +255,45 @@ def _extract_workout(text: str) -> WorkoutEntry | None:
 
 def _extract_exercises(text: str) -> list[ExerciseEntry]:
     exercises: list[ExerciseEntry] = []
+    normalized_text = re.sub(r"\bod\b", "of", text, flags=re.I)
 
     for match in re.finditer(
         r"\b(?P<name>squats?|rdl|romanian deadlifts?)\s+"
         r"(?P<sets>\d+)\s*x\s*(?P<reps>\d+)"
         r"(?:\s+at\s+(?P<load>[^,.;]+))?",
-        text,
+        normalized_text,
         flags=re.I,
     ):
-        name = match.group("name").lower()
-        if name == "rdl":
-            name = "Romanian deadlift"
-        elif name.startswith("squat"):
-            name = "squat"
         exercises.append(
             ExerciseEntry(
-                name=name,
+                name=_normalize_exercise_name(match.group("name")),
                 sets=int(match.group("sets")),
                 reps=int(match.group("reps")),
                 load=_normalize_load(match.group("load")),
             )
         )
+
+    structured_patterns = (
+        r"\b(?P<name>squats?|deadlifts?|rdl|romanian deadlifts?|lunges?|chin[- ]ups?|dumbbell press|dumbell press)\s+"
+        r"(?P<sets>\d+)\s*sets?\s*(?:of|x)?\s*(?P<reps>\d+)\s*(?:reps?|each)?"
+        r"(?:\s*(?:at|with|with a)?\s*(?P<load>\d+(?:\.\d+)?\s*(?:kg|kgs|lb|lbs)))?",
+        r"\b(?P<sets>\d+)\s*sets?\s*(?P<reps>\d+)\s*(?:reps?|each)?\s+"
+        r"(?P<name>squats?|deadlifts?|rdl|romanian deadlifts?|lunges?|chin[- ]ups?|dumbbell press|dumbell press)"
+        r"(?:\s*(?:at|with|with a)?\s*(?P<load>\d+(?:\.\d+)?\s*(?:kg|kgs|lb|lbs)))?",
+    )
+    seen = {(exercise.name, exercise.sets, exercise.reps, exercise.load) for exercise in exercises}
+    for pattern in structured_patterns:
+        for match in re.finditer(pattern, normalized_text, flags=re.I):
+            exercise = ExerciseEntry(
+                name=_normalize_exercise_name(match.group("name")),
+                sets=int(match.group("sets")),
+                reps=int(match.group("reps")),
+                load=_normalize_load(match.group("load")),
+            )
+            key = (exercise.name, exercise.sets, exercise.reps, exercise.load)
+            if key not in seen:
+                exercises.append(exercise)
+                seen.add(key)
 
     metcon_match = re.search(rf"{_NUMBER}\s*(?:min|mins|minutes)\s+metcon\b", text, flags=re.I)
     if metcon_match:
@@ -411,7 +437,47 @@ def _normalize_load(load: str | None) -> str | None:
     clean = load.strip()
     if clean.endswith("%"):
         return f"{clean} 1RM"
+    clean = re.sub(r"\bkgs\b", "kg", clean, flags=re.I)
+    clean = re.sub(r"\blbs\b", "lb", clean, flags=re.I)
     return clean
+
+
+def _normalize_exercise_name(name: str) -> str:
+    lower = name.lower().strip()
+    if lower == "rdl":
+        return "Romanian deadlift"
+    if lower.startswith("romanian deadlift"):
+        return "Romanian deadlift"
+    if lower.startswith("squat"):
+        return "squat"
+    if lower.startswith("deadlift"):
+        return "deadlift"
+    if lower.startswith("lunge"):
+        return "lunge"
+    if lower in {"chin ups", "chin-ups", "chin up"}:
+        return "chin up"
+    if lower in {"dumbell press", "dumbbell press"}:
+        return "dumbbell press"
+    return lower
+
+
+def _estimate_calories(description: str) -> float | None:
+    lower = description.lower()
+    rules = (
+        (("oatmeal", "dates", "peanut butter", "chocolate"), 650.0),
+        (("oatmeal", "peanut butter"), 520.0),
+        (("oatmeal",), 350.0),
+        (("chicken", "rice", "salad"), 650.0),
+        (("chicken", "rice"), 620.0),
+        (("chicken", "fries"), 850.0),
+        (("eggs",), 300.0),
+    )
+    for terms, calories in rules:
+        if all(term in lower for term in terms):
+            return calories
+    if _looks_like_food(description):
+        return 600.0
+    return None
 
 
 def _looks_like_food(text: str) -> bool:

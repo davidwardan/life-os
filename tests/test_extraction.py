@@ -88,3 +88,38 @@ class ExtractionTests(TestCase):
             [exercise.name for exercise in parsed.workout.exercises],
             ["squat", "deadlift", "lunge", "chin up", "dumbbell press"],
         )
+
+    def test_extracts_name_first_sets_reps_and_load(self) -> None:
+        parsed = extract_daily_log(
+            "I did squats 3 sets od 10 reps 100 kg",
+            date(2026, 4, 25),
+        )
+
+        exercise = parsed.workout.exercises[0]
+        self.assertEqual(exercise.name, "squat")
+        self.assertEqual(exercise.sets, 3)
+        self.assertEqual(exercise.reps, 10)
+        self.assertEqual(exercise.load, "100 kg")
+
+    def test_extracts_sets_first_sets_reps_and_load(self) -> None:
+        parsed = extract_daily_log(
+            "i did 3sets 10 each squats with a 100 kg",
+            date(2026, 4, 25),
+        )
+
+        exercise = parsed.workout.exercises[0]
+        self.assertEqual(exercise.name, "squat")
+        self.assertEqual(exercise.sets, 3)
+        self.assertEqual(exercise.reps, 10)
+        self.assertEqual(exercise.load, "100 kg")
+
+    def test_estimates_calories_when_meal_calories_are_missing(self) -> None:
+        parsed = extract_daily_log(
+            "Dinner was chicken and fries.",
+            date(2026, 4, 25),
+        )
+
+        self.assertEqual(parsed.nutrition[0].meal_type, "dinner")
+        self.assertEqual(parsed.nutrition[0].calories, 850)
+        self.assertTrue(parsed.nutrition[0].estimated)
+        self.assertTrue(any("actual calories" in q.lower() for q in parsed.clarification_questions))

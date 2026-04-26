@@ -37,8 +37,11 @@ Extraction checklist:
 - Food, meals, calories, protein, macros -> nutrition.
 - Meal timing such as morning/lunch/dinner -> nutrition.meal_type.
 - Training, exercise, workout duration, RPE, intensity -> workout and workout.exercises.
+- Parse flexible exercise phrasing into the same structure. Example: "squats 3 sets of 10 reps 100 kg" and "3sets 10 each squats with a 100 kg" both mean name=squat, sets=3, reps=10, load="100 kg".
+- If workout exercise details are missing, leave them null; the backend may fill them from prior matching workouts.
 - Energy, mood, stress, sleep, soreness, recovery -> wellbeing.
 - Work sessions, career progress, project names, research, writing, blockers -> career.
+- For meals, extract explicitly provided calories when present. If calories are absent, estimate average calories for a normal portion, set estimated=true, and keep confidence conservative.
 
 Example:
 Text: "Today I slept 6h, energy 5/10 and stress 7/10. Ate oatmeal with dates in the morning. Lunch was 180g cooked chicken with rice. Did lower body: squats 4x5 at 80%, RDL 3x8, and 12 min metcon. Worked 3 hours on the global TAGI-LSTM paper and fixed the SKF motivation section. Mood was okay but I felt mentally drained."

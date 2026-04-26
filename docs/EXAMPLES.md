@@ -55,6 +55,31 @@ journal_entries
 - tags: fatigue, stress, research
 ```
 
+## Flexible Structured Logging
+
+Equivalent workout phrasings should produce the same exercise record:
+
+```text
+I did squats 3 sets of 10 reps 100 kg.
+I did 3sets 10 each squats with a 100 kg.
+```
+
+Both become:
+
+```text
+workout_exercises
+- name: squat
+- sets: 3
+- reps: 10
+- load: 100 kg
+```
+
+If an exercise is logged without sets, reps, or load, Life OS looks for the most recent matching exercise and fills only the missing fields. If there is no history, the fields stay empty.
+
+Duplicate same-day structured rows are skipped. The raw message is still preserved, but Life OS avoids creating repeated workout, meal, career, wellbeing, or journal records when the same thing is sent twice.
+
+For nutrition, explicitly provided calories are preferred. If calories are missing, Life OS may estimate a normal portion conservatively and ask whether you want to replace the estimate with actual calories.
+
 ## Telegram Plot Commands
 
 Single plot:
