@@ -63,8 +63,14 @@ class AgentWorkflow:
         *,
         source: str,
         entry_date: date | None,
+        forced_intent: Intent | None = None,
     ) -> WorkflowResult:
         state: WorkflowState = {"text": text, "source": source, "entry_date": entry_date}
+        if forced_intent is not None:
+            state["intent"] = forced_intent
+            state = await self._execute_without_graph(state)
+            return state["result"]
+
         if self._graph is not None:
             final_state = await self._graph.ainvoke(state)
             return final_state["result"]
@@ -80,8 +86,12 @@ class AgentWorkflow:
         source: str,
         entry_date: date | None,
     ) -> WorkflowResult:
-        state = await self._run_log({"text": text, "source": source, "entry_date": entry_date})
-        return state["result"]
+        return await self.process_text(
+            text,
+            source=source,
+            entry_date=entry_date,
+            forced_intent="log",
+        )
 
     def _build_graph(self) -> Any | None:
         try:
