@@ -5,6 +5,7 @@ from datetime import date
 from typing import Any, Protocol
 
 from backend.app.config import settings
+from backend.app.extraction_candidates import ExtractionCandidate, validate_extraction_candidates
 from backend.app.followup import build_followup_questions
 from backend.app.schemas import (
     CareerEntry,
@@ -18,7 +19,7 @@ from backend.app.schemas import (
 
 
 LANGEXTRACT_PROMPT = """
-Extract personal life log facts in order of appearance.
+Extract personal life log facts and request-management signals in order of appearance.
 
 Rules:
 - Use exact text spans from the input for every extraction.
@@ -28,14 +29,28 @@ Rules:
 - Use null only by omitting unknown attributes.
 - Mark values as explicit when directly stated.
 - Mark calories or macros as estimated only when inferred.
+- Do not turn conversation-management text into life-log facts.
+- If the user says they already provided a field, extract already_answered, not meal/workout/journal.
+- If the user answers a previous bot question, extract followup_answer.
+- If a phrase is about the conversation itself, do not store it as nutrition, workout, or journal.
 
 Extraction classes:
 - wellbeing_metric: sleep, energy, stress, mood, sleep_quality, fatigue/recovery notes.
-- meal: meals, food, calories, protein, carbs, fats, meal timing.
-- workout: workout type, duration, distance, pace, intensity, broad training note.
+- meal: actual meals, food, calories, protein, carbs, fats, meal timing.
+- workout: actual workout type, duration, distance, pace, intensity, broad training note.
 - exercise: exercise name, sets, reps, load, duration.
 - career: work session, project, activity, duration, progress, blockers.
 - journal: subjective reflection, mood note, durable tags.
+- followup_answer: user is answering a question just asked by the bot.
+- already_answered: user says a field was already provided.
+- no_more_info: user declines to provide more information.
+- correction: user corrects or updates a previous log.
+- query: user asks for information, a plot, a briefing, memory, or deletion.
+
+Important:
+Text like "I already provided my meals" is already_answered with field=nutrition. It is not a meal.
+Text like "I already told you my workout" is already_answered with field=workout. It is not a workout.
+Text like "skip" or "no more info" is no_more_info. It is not a journal.
 
 Useful attributes:
 - date
@@ -45,6 +60,7 @@ Useful attributes:
 - name, sets, reps, load, notes
 - project, activity, duration_hours, progress_note, blockers
 - text, tags, sentiment
+- field, fields, target, reason
 """.strip()
 
 
@@ -93,11 +109,12 @@ class LangExtractClient:
 
 
 def parsed_log_from_langextract(extractions: list[Any], entry_date: date) -> ParsedDailyLog:
-    wellbeing = _wellbeing_from_extractions(extractions)
-    nutrition = _nutrition_from_extractions(extractions)
-    workout = _workout_from_extractions(extractions)
-    career = _career_from_extractions(extractions)
-    journal = _journal_from_extractions(extractions)
+    candidates = validate_extraction_candidates(extractions)
+    wellbeing = _wellbeing_from_extractions(candidates)
+    nutrition = _nutrition_from_extractions(candidates)
+    workout = _workout_from_extractions(candidates)
+    career = _career_from_extractions(candidates)
+    journal = _journal_from_extractions(candidates)
 
     parsed = ParsedDailyLog(
         date=entry_date,
@@ -112,7 +129,7 @@ def parsed_log_from_langextract(extractions: list[Any], entry_date: date) -> Par
     return parsed
 
 
-def _wellbeing_from_extractions(extractions: list[Any]) -> WellbeingEntry | None:
+def _wellbeing_from_extractions(extractions: list[ExtractionCandidate]) -> WellbeingEntry | None:
     values: dict[str, Any] = {"confidence": 0.78}
     notes: list[str] = []
     for item in _of_class(extractions, "wellbeing_metric"):
@@ -140,7 +157,7 @@ def _wellbeing_from_extractions(extractions: list[Any]) -> WellbeingEntry | None
     return WellbeingEntry(**values)
 
 
-def _nutrition_from_extractions(extractions: list[Any]) -> list[NutritionEntry]:
+def _nutrition_from_extractions(extractions: list[ExtractionCandidate]) -> list[NutritionEntry]:
     entries: list[NutritionEntry] = []
     for item in _of_class(extractions, "meal"):
         attrs = _attrs(item)
@@ -156,13 +173,13 @@ def _nutrition_from_extractions(extractions: list[Any]) -> list[NutritionEntry]:
                 carbs_g=_number(attrs.get("carbs_g")),
                 fat_g=_number(attrs.get("fat_g")),
                 estimated=_bool(attrs.get("estimated")),
-                confidence=float(attrs.get("confidence") or 0.72),
+                confidence=float(attrs.get("confidence") or item.confidence),
             )
         )
     return entries
 
 
-def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
+def _workout_from_extractions(extractions: list[ExtractionCandidate]) -> WorkoutEntry | None:
     workout_type = None
     duration_min = None
     distance_km = None
@@ -180,7 +197,7 @@ def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
         intensity_number = _number(attrs.get("intensity"))
         intensity = int(intensity_number) if intensity_number is not None else None
         notes = _optional_str(attrs.get("notes"))
-        confidence = float(attrs.get("confidence") or confidence)
+        confidence = float(attrs.get("confidence") or workouts[0].confidence)
 
     exercises = []
     for item in _of_class(extractions, "exercise"):
@@ -213,7 +230,7 @@ def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
     )
 
 
-def _career_from_extractions(extractions: list[Any]) -> list[CareerEntry]:
+def _career_from_extractions(extractions: list[ExtractionCandidate]) -> list[CareerEntry]:
     entries: list[CareerEntry] = []
     for item in _of_class(extractions, "career"):
         attrs = _attrs(item)
@@ -223,7 +240,7 @@ def _career_from_extractions(extractions: list[Any]) -> list[CareerEntry]:
             duration_hours=_number(attrs.get("duration_hours")),
             progress_note=_optional_str(attrs.get("progress_note")),
             blockers=_optional_str(attrs.get("blockers")),
-            confidence=float(attrs.get("confidence") or 0.72),
+            confidence=float(attrs.get("confidence") or item.confidence),
         )
         if entries and not entry.project and not entry.duration_hours:
             previous = entries[-1]
@@ -236,7 +253,7 @@ def _career_from_extractions(extractions: list[Any]) -> list[CareerEntry]:
     return entries
 
 
-def _journal_from_extractions(extractions: list[Any]) -> JournalEntry | None:
+def _journal_from_extractions(extractions: list[ExtractionCandidate]) -> JournalEntry | None:
     journals = _of_class(extractions, "journal")
     if not journals:
         return None
@@ -323,21 +340,50 @@ def _examples(lx: Any) -> list[Any]:
                     attributes={"text": "Mood was okay but I felt mentally drained.", "tags": ["fatigue", "research"]},
                 ),
             ],
-        )
+        ),
+        lx.data.ExampleData(
+            text="i slept for 7 hours and i think i already provide my meals",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="wellbeing_metric",
+                    extraction_text="slept for 7 hours",
+                    attributes={"metric": "sleep_hours", "value": 7, "unit": "h"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="already_answered",
+                    extraction_text="i think i already provide my meals",
+                    attributes={"field": "nutrition"},
+                ),
+                lx.data.Extraction(
+                    extraction_class="followup_answer",
+                    extraction_text="i slept for 7 hours and i think i already provide my meals",
+                    attributes={"fields": ["sleep", "nutrition"]},
+                ),
+            ],
+        ),
+        lx.data.ExampleData(
+            text="no thanks skip the workout details",
+            extractions=[
+                lx.data.Extraction(
+                    extraction_class="no_more_info",
+                    extraction_text="no thanks skip the workout details",
+                    attributes={"field": "workout"},
+                )
+            ],
+        ),
     ]
 
 
-def _of_class(extractions: list[Any], name: str) -> list[Any]:
-    return [item for item in extractions if getattr(item, "extraction_class", None) == name]
+def _of_class(extractions: list[ExtractionCandidate], name: str) -> list[ExtractionCandidate]:
+    return [item for item in extractions if item.extraction_class == name]
 
 
-def _attrs(item: Any) -> dict[str, Any]:
-    attrs = getattr(item, "attributes", None)
-    return attrs if isinstance(attrs, dict) else {}
+def _attrs(item: ExtractionCandidate) -> dict[str, Any]:
+    return item.attributes
 
 
-def _text(item: Any) -> str:
-    return str(getattr(item, "extraction_text", "") or "").strip()
+def _text(item: ExtractionCandidate) -> str:
+    return item.extraction_text.strip()
 
 
 def _optional_str(value: Any) -> str | None:
