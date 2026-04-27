@@ -43,14 +43,21 @@ def extract_daily_log(text: str, entry_date: date | None = None) -> ParsedDailyL
 
 def is_non_logging_reply(text: str) -> bool:
     lower = " ".join(text.lower().strip().split())
-    refusal_patterns = (
+    return lower in _NON_LOGGING_REPLIES
+
+
+def contains_non_logging_reply(text: str) -> bool:
+    lower = " ".join(text.lower().strip().split())
+    return any(pattern in lower for pattern in _NON_LOGGING_REPLIES)
+
+
+_NON_LOGGING_REPLIES = (
         "i do not want to give more info",
         "i don't want to give more info",
         "no more info",
         "no thanks",
         "skip",
-    )
-    return lower in refusal_patterns
+)
 
 
 def _extract_wellbeing(text: str) -> WellbeingEntry | None:
@@ -61,7 +68,11 @@ def _extract_wellbeing(text: str) -> WellbeingEntry | None:
         mood = 6
 
     energy = _rating(lower, "energy")
+    if energy is None:
+        energy = _qualitative_rating(lower, "energy")
     stress = _rating(lower, "stress")
+    if stress is None:
+        stress = _qualitative_rating(lower, "stress")
     sleep_quality = _rating(lower, "sleep quality")
 
     sleep_match = re.search(rf"(?:slept|sleep)\s*{_NUMBER}\s*(?:h|hr|hrs|hours)?\b", lower)
@@ -75,6 +86,8 @@ def _extract_wellbeing(text: str) -> WellbeingEntry | None:
         notes.append("Felt mentally drained.")
     if "tired" in lower and not notes:
         notes.append("Felt tired.")
+    if "destroyed" in lower:
+        notes.append("Felt destroyed after training.")
 
     if all(value is None for value in (mood, energy, stress, sleep_quality)) and sleep_match is None and not notes:
         return None
@@ -215,6 +228,8 @@ def _extract_workout(text: str) -> WorkoutEntry | None:
         return None
 
     duration_match = re.search(rf"{_NUMBER}\s*(?:min|mins|minutes)\b", lower)
+    distance_match = re.search(rf"{_NUMBER}\s*(?:km|kilometers?|kilometres?)\b", lower)
+    pace_match = re.search(rf"(?:pace(?:\s+of)?|at\s+a\s+pace\s+of)\s*{_NUMBER}\b", lower)
     intensity_match = re.search(rf"(?:intensity|rpe)\s*{_NUMBER}", lower)
 
     workout_type = None
@@ -228,11 +243,14 @@ def _extract_workout(text: str) -> WorkoutEntry | None:
         "chest",
         "back",
         "run",
+        "running",
         "metcon",
     ):
         if candidate in lower:
-            workout_type = candidate
+            workout_type = "running" if candidate == "run" else candidate
             break
+    if workout_type is None and re.search(r"\b(?:ran|run|running)\b", lower):
+        workout_type = "running"
 
     if workout_type is None and "trained" in lower:
         after_trained = re.search(r"trained\s+([^.;,]+)", text, flags=re.I)
@@ -246,6 +264,8 @@ def _extract_workout(text: str) -> WorkoutEntry | None:
     return WorkoutEntry(
         workout_type=workout_type,
         duration_min=float(duration_match.group(1)) if duration_match and not exercises else None,
+        distance_km=float(distance_match.group(1)) if distance_match else None,
+        pace=float(pace_match.group(1)) if pace_match else None,
         intensity=int(float(intensity_match.group(1))) if intensity_match else None,
         notes=None if exercises else text,
         exercises=exercises,
@@ -408,11 +428,24 @@ def _clarification_questions(
     questions: list[str] = []
     if nutrition and all(item.calories is None for item in nutrition):
         questions.append("Do you want me to estimate calories and macros for the meals?")
-    if workout and not workout.exercises and workout.duration_min is None:
+    if (
+        workout
+        and not workout.exercises
+        and workout.duration_min is None
+        and workout.distance_km is None
+        and workout.pace is None
+        and not _is_cardio_workout(workout.workout_type)
+    ):
         questions.append("What kind of training did you do, and for how long?")
     if career and any(item.duration_hours is None for item in career):
         questions.append("Roughly how long did you work on the project?")
     return questions[:2]
+
+
+def _is_cardio_workout(workout_type: str | None) -> bool:
+    if not workout_type:
+        return False
+    return any(marker in workout_type.lower() for marker in ("run", "running", "cardio", "bike", "cycling", "swim"))
 
 
 def _extract_between(text: str, start_patterns: tuple[str, ...], end_pattern: str) -> str | None:
@@ -428,6 +461,22 @@ def _rating(text: str, label: str) -> int | None:
     match = re.search(rf"\b{escaped}\s*(?:is|was|:)?\s*([1-9]|10)(?:/10)?\b", text)
     if match:
         return int(match.group(1))
+    return None
+
+
+def _qualitative_rating(text: str, label: str) -> int | None:
+    escaped = re.escape(label)
+    patterns = (
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?very\s+low\b", 2),
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?low\b", 3),
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?medium\b", 5),
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?high\b", 8),
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?very\s+high\b", 9),
+        (rf"\b{escaped}\s+(?:level\s+)?(?:is\s+|was\s+|also\s+)?okay\b", 6),
+    )
+    for pattern, value in patterns:
+        if re.search(pattern, text):
+            return value
     return None
 
 

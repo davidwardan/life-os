@@ -39,9 +39,10 @@ Extraction checklist:
 - Food, meals, calories, protein, macros -> nutrition.
 - Meal timing such as morning/lunch/dinner -> nutrition.meal_type.
 - Training, exercise, workout duration, RPE, intensity -> workout and workout.exercises.
+- Running/cardio distance and pace -> workout.distance_km and workout.pace; do not ask for sets/exercises for running.
 - Parse flexible exercise phrasing into the same structure. Example: "squats 3 sets of 10 reps 100 kg" and "3sets 10 each squats with a 100 kg" both mean name=squat, sets=3, reps=10, load="100 kg".
 - If workout exercise details are missing, leave them null; the backend may fill them from prior matching workouts.
-- Energy, mood, stress, sleep, soreness, recovery -> wellbeing.
+- Energy, mood, stress, sleep, soreness, recovery -> wellbeing. Map qualitative values conservatively, e.g. energy low -> 3/10, stress low -> 3/10, destroyed -> wellbeing notes.
 - Work sessions, career progress, project names, research, writing, blockers -> career.
 - For meals, extract explicitly provided calories when present. If calories are absent, estimate average calories for a normal portion, set estimated=true, and keep confidence conservative.
 
@@ -179,6 +180,7 @@ class ExtractionService:
                     parsed = parsed_log_from_langextract(extractions, target_date)
                     if not _has_structured_signal(parsed):
                         raise ValueError("LangExtract returned no supported life log fields")
+                    _reconcile_with_deterministic(parsed, text, target_date)
                     if entry_date is not None:
                         parsed.entry_date = entry_date
                     return parsed, "langextract", None
@@ -199,7 +201,7 @@ class ExtractionService:
             parsed = ParsedDailyLog.model_validate(await client.extract(text, target_date))
             if entry_date is not None:
                 parsed.entry_date = entry_date
-            parsed.clarification_questions = build_followup_questions(parsed)
+            _reconcile_with_deterministic(parsed, text, target_date)
             return parsed, "llm", None
         except (asyncio.TimeoutError, httpx.HTTPError, json.JSONDecodeError, ValidationError, ValueError) as error:
             fallback = extract_daily_log(text, target_date)
@@ -227,6 +229,29 @@ def _has_structured_signal(parsed: ParsedDailyLog) -> bool:
         or parsed.career
         or parsed.journal
     )
+
+
+def _reconcile_with_deterministic(parsed: ParsedDailyLog, text: str, target_date: date) -> None:
+    deterministic = extract_daily_log(text, target_date)
+    if deterministic.wellbeing:
+        if parsed.wellbeing is None:
+            parsed.wellbeing = deterministic.wellbeing
+        else:
+            for field in ("sleep_hours", "sleep_quality", "energy", "stress", "mood", "notes"):
+                if getattr(parsed.wellbeing, field) is None:
+                    setattr(parsed.wellbeing, field, getattr(deterministic.wellbeing, field))
+
+    if deterministic.workout:
+        if parsed.workout is None:
+            parsed.workout = deterministic.workout
+        else:
+            for field in ("workout_type", "duration_min", "distance_km", "pace", "intensity", "notes"):
+                if getattr(parsed.workout, field) is None:
+                    setattr(parsed.workout, field, getattr(deterministic.workout, field))
+            if not parsed.workout.exercises and deterministic.workout.exercises:
+                parsed.workout.exercises = deterministic.workout.exercises
+
+    parsed.clarification_questions = build_followup_questions(parsed)
 
 
 def _decode_response_json(payload: dict[str, Any]) -> dict[str, Any]:

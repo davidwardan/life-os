@@ -32,7 +32,7 @@ Rules:
 Extraction classes:
 - wellbeing_metric: sleep, energy, stress, mood, sleep_quality, fatigue/recovery notes.
 - meal: meals, food, calories, protein, carbs, fats, meal timing.
-- workout: workout type, duration, intensity, broad training note.
+- workout: workout type, duration, distance, pace, intensity, broad training note.
 - exercise: exercise name, sets, reps, load, duration.
 - career: work session, project, activity, duration, progress, blockers.
 - journal: subjective reflection, mood note, durable tags.
@@ -41,7 +41,7 @@ Useful attributes:
 - date
 - metric, value, unit, confidence
 - meal_type, calories, protein_g, carbs_g, fat_g, estimated, confidence
-- workout_type, duration_min, intensity, confidence
+- workout_type, duration_min, distance_km, pace, intensity, confidence
 - name, sets, reps, load, notes
 - project, activity, duration_hours, progress_note, blockers
 - text, tags, sentiment
@@ -165,6 +165,8 @@ def _nutrition_from_extractions(extractions: list[Any]) -> list[NutritionEntry]:
 def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
     workout_type = None
     duration_min = None
+    distance_km = None
+    pace = None
     intensity = None
     notes = None
     confidence = 0.72
@@ -173,6 +175,8 @@ def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
         attrs = _attrs(workouts[0])
         workout_type = _optional_str(attrs.get("workout_type")) or _text(workouts[0])
         duration_min = _number(attrs.get("duration_min"))
+        distance_km = _number(attrs.get("distance_km"))
+        pace = _number(attrs.get("pace"))
         intensity_number = _number(attrs.get("intensity"))
         intensity = int(intensity_number) if intensity_number is not None else None
         notes = _optional_str(attrs.get("notes"))
@@ -200,6 +204,8 @@ def _workout_from_extractions(extractions: list[Any]) -> WorkoutEntry | None:
     return WorkoutEntry(
         workout_type=workout_type,
         duration_min=duration_min if not exercises else None,
+        distance_km=distance_km,
+        pace=pace,
         intensity=intensity,
         notes=notes,
         exercises=exercises,

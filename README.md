@@ -40,6 +40,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Raw message archive for every logged note
 - Structured logs for wellbeing, nutrition, workouts, exercises, career, and journal entries
 - Context-aware logging that fills missing workout details from recent matching exercises
+- Cardio-aware running logs with distance, pace, and qualitative energy/stress parsing
 - Same-day structured duplicate prevention
 - Controlled log deletion from the web app or Telegram
 - Long-term memory for explicit preferences, strategies, goals, and briefing style

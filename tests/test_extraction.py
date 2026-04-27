@@ -123,3 +123,19 @@ class ExtractionTests(TestCase):
         self.assertEqual(parsed.nutrition[0].calories, 850)
         self.assertTrue(parsed.nutrition[0].estimated)
         self.assertTrue(any("actual calories" in q.lower() for q in parsed.clarification_questions))
+
+    def test_extracts_running_distance_pace_and_qualitative_wellbeing(self) -> None:
+        parsed = extract_daily_log(
+            "i ran for 5km with a pace of 5.5 yet i am destroyed "
+            "stress level low but energy level also low",
+            date(2026, 4, 27),
+        )
+
+        self.assertEqual(parsed.workout.workout_type, "running")
+        self.assertEqual(parsed.workout.distance_km, 5)
+        self.assertEqual(parsed.workout.pace, 5.5)
+        self.assertEqual(parsed.wellbeing.energy, 3)
+        self.assertEqual(parsed.wellbeing.stress, 3)
+        self.assertIn("destroyed", parsed.wellbeing.notes.lower())
+        self.assertFalse(any("sets" in question.lower() for question in parsed.clarification_questions))
+        self.assertFalse(any("what kind of training" in question.lower() for question in parsed.clarification_questions))
