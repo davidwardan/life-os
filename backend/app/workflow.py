@@ -11,6 +11,7 @@ from backend.app.extraction import contains_non_logging_reply, is_non_logging_re
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService, is_memory_request
 from backend.app.plotting import PlotResult, PlotService, parse_plot_requests
+from backend.app.postprocess import sanitize_parsed_log, suppress_redundant_followups
 from backend.app.schemas import MessageIn, ParsedDailyLog
 
 
@@ -217,6 +218,8 @@ class AgentWorkflow:
     async def _run_log(self, state: WorkflowState) -> WorkflowState:
         entry_date = state.get("entry_date")
         parsed, method, error = await self.extractor.extract(state["text"], entry_date)
+        parsed = sanitize_parsed_log(parsed, state["text"])
+        suppress_redundant_followups(parsed, self.db.recent_logs(limit=100), entry_date)
         saved = self.db.save_message(
             MessageIn(text=state["text"], entry_date=entry_date, source=state["source"]),
             parsed,
