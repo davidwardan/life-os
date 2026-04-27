@@ -34,11 +34,16 @@ Rules:
 - Put open-ended reflection into journal.text with concise tags.
 - Add clarification_questions only for useful follow-up questions.
 - Dates must use ISO format YYYY-MM-DD.
+- Do not store conversation-management text as nutrition, workout, or journal.
+- If the user says they already provided something, do not convert that statement into the thing itself.
+- If the user says they already provided meals, leave nutrition empty unless actual foods are also present.
+- If the user says they already provided workout details, leave workout empty unless actual training details are also present.
+- If the user says "skip", "no thanks", or "no more info", do not store that as journal text.
 
 Extraction checklist:
-- Food, meals, calories, protein, macros -> nutrition.
+- Food, meals, calories, protein, macros -> nutrition, but only when actual foods or nutrition values are present.
 - Meal timing such as morning/lunch/dinner -> nutrition.meal_type.
-- Training, exercise, workout duration, RPE, intensity -> workout and workout.exercises.
+- Training, exercise, workout duration, RPE, intensity -> workout and workout.exercises, but only when actual training information is present.
 - Running/cardio distance and pace -> workout.distance_km and workout.pace; do not ask for sets/exercises for running.
 - Parse flexible exercise phrasing into the same structure. Example: "squats 3 sets of 10 reps 100 kg" and "3sets 10 each squats with a 100 kg" both mean name=squat, sets=3, reps=10, load="100 kg".
 - If workout exercise details are missing, leave them null; the backend may fill them from prior matching workouts.
@@ -46,7 +51,20 @@ Extraction checklist:
 - Work sessions, career progress, project names, research, writing, blockers -> career.
 - For meals, extract explicitly provided calories when present. If calories are absent, estimate average calories for a normal portion, set estimated=true, and keep confidence conservative.
 
-Example:
+Examples:
+Text: "i slept for 7 hours and i think i already provide my meals"
+Must include:
+- wellbeing.sleep_hours=7
+- nutrition=[]
+- journal=null
+- Do not create a nutrition item with description "i think i already provide my meals".
+
+Text: "no thanks skip the workout details"
+Must include:
+- workout=null
+- journal=null
+- clarification_questions=[]
+
 Text: "Today I slept 6h, energy 5/10 and stress 7/10. Ate oatmeal with dates in the morning. Lunch was 180g cooked chicken with rice. Did lower body: squats 4x5 at 80%, RDL 3x8, and 12 min metcon. Worked 3 hours on the global TAGI-LSTM paper and fixed the SKF motivation section. Mood was okay but I felt mentally drained."
 Must include:
 - date
