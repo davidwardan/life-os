@@ -17,9 +17,13 @@ services:
         value: "true"
       - key: LIFE_OS_EXTRACTOR
         value: auto
+      - key: LIFE_OS_ENABLE_LANGEXTRACT
+        value: "false"
       - key: LIFE_OS_LLM_TIMEOUT_SECONDS
         value: "60"
       - key: OPENROUTER_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b:free
+      - key: LIFE_OS_LANGEXTRACT_MODEL
         value: nvidia/nemotron-3-super-120b-a12b:free
       - key: OPENROUTER_FALLBACK_MODELS
         value: nvidia/nemotron-3-nano-30b-a3b:free

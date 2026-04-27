@@ -11,6 +11,8 @@ from pydantic import ValidationError
 from backend.app.config import settings
 from backend.app.extraction import extract_daily_log
 from backend.app.followup import build_followup_questions
+from backend.app.langextract_extraction import LangExtractClient, LangExtractRunner
+from backend.app.langextract_extraction import parsed_log_from_langextract
 from backend.app.schemas import ParsedDailyLog
 
 
@@ -139,15 +141,52 @@ class OpenRouterClient:
 
 
 class ExtractionService:
-    def __init__(self, mode: str = settings.extractor, llm_client: LLMClient | None = None):
+    def __init__(
+        self,
+        mode: str = settings.extractor,
+        llm_client: LLMClient | None = None,
+        langextract_client: LangExtractRunner | None = None,
+    ):
         self.mode = mode
         self.llm_client = llm_client
+        self.langextract_client = langextract_client
 
     async def extract(self, text: str, entry_date: date | None = None) -> tuple[ParsedDailyLog, str, str | None]:
         target_date = entry_date or date.today()
 
         if self.mode == "deterministic":
             return extract_daily_log(text, target_date), "deterministic", None
+
+        langextract_error = None
+        should_try_langextract = self.mode == "langextract" or (
+            self.mode == "auto" and settings.langextract_enabled
+        )
+        if should_try_langextract:
+            client = self.langextract_client or _configured_langextract_client()
+            if client is None:
+                langextract_error = "OPENROUTER_API_KEY is not configured for LangExtract"
+                if self.mode == "langextract":
+                    fallback = extract_daily_log(text, target_date)
+                    return fallback, "deterministic", langextract_error
+            else:
+                try:
+                    extractions = await asyncio.wait_for(
+                        client.extract(text, target_date),
+                        timeout=settings.llm_timeout_seconds,
+                    )
+                    if not extractions:
+                        raise ValueError("LangExtract returned no grounded extractions")
+                    parsed = parsed_log_from_langextract(extractions, target_date)
+                    if not _has_structured_signal(parsed):
+                        raise ValueError("LangExtract returned no supported life log fields")
+                    if entry_date is not None:
+                        parsed.entry_date = entry_date
+                    return parsed, "langextract", None
+                except Exception as error:
+                    langextract_error = f"LangExtract failed: {_format_error(error)}"
+                    if self.mode == "langextract":
+                        fallback = extract_daily_log(text, target_date)
+                        return fallback, "deterministic", langextract_error
 
         client = self.llm_client or _configured_llm_client()
         if client is None:
@@ -164,13 +203,30 @@ class ExtractionService:
             return parsed, "llm", None
         except (asyncio.TimeoutError, httpx.HTTPError, json.JSONDecodeError, ValidationError, ValueError) as error:
             fallback = extract_daily_log(text, target_date)
-            return fallback, "deterministic", f"LLM extraction failed: {_format_error(error)}"
+            prefix = f"{langextract_error}; " if langextract_error else ""
+            return fallback, "deterministic", f"{prefix}LLM extraction failed: {_format_error(error)}"
 
 
 def _configured_llm_client() -> OpenRouterClient | None:
     if not settings.openrouter_api_key:
         return None
     return OpenRouterClient(api_key=settings.openrouter_api_key)
+
+
+def _configured_langextract_client() -> LangExtractClient | None:
+    if not settings.openrouter_api_key:
+        return None
+    return LangExtractClient(api_key=settings.openrouter_api_key)
+
+
+def _has_structured_signal(parsed: ParsedDailyLog) -> bool:
+    return bool(
+        parsed.wellbeing
+        or parsed.nutrition
+        or parsed.workout
+        or parsed.career
+        or parsed.journal
+    )
 
 
 def _decode_response_json(payload: dict[str, Any]) -> dict[str, Any]:

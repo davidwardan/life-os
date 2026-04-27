@@ -33,6 +33,11 @@ class Settings:
         "LIFE_OS_LLM_MODEL",
         getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini"),
     )
+    langextract_enabled: bool = _truthy(getenv("LIFE_OS_ENABLE_LANGEXTRACT"))
+    langextract_model: str = getenv(
+        "LIFE_OS_LANGEXTRACT_MODEL",
+        getenv("LIFE_OS_LLM_MODEL", getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini")),
+    )
     openrouter_fallback_models: tuple[str, ...] = _split_csv(
         getenv("OPENROUTER_FALLBACK_MODELS", "")
     )
