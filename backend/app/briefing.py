@@ -337,7 +337,7 @@ class BriefingService:
 
 def is_briefing_request(text: str) -> bool:
     lower = " ".join(text.lower().strip().split())
-    return lower in {
+    if lower in {
         "/brief",
         "/briefing",
         "brief",
@@ -347,7 +347,19 @@ def is_briefing_request(text: str) -> bool:
         "today's brief",
         "todays brief",
         "daily brief",
-    }
+    }:
+        return True
+    request_markers = (
+        "morning brief",
+        "morning briefing",
+        "daily brief",
+        "today's brief",
+        "todays brief",
+    )
+    command_markers = ("send", "provide", "give", "show", "make", "generate")
+    return any(marker in lower for marker in request_markers) and (
+        lower.startswith(command_markers) or any(f" {marker}" in lower for marker in command_markers)
+    )
 
 
 def _deterministic_briefing(target_date: date, features: dict[str, Any]) -> str:

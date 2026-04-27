@@ -80,6 +80,8 @@ CREATE TABLE IF NOT EXISTS workout_logs (
     entry_date TEXT,
     workout_type TEXT,
     duration_min REAL,
+    distance_km REAL,
+    pace REAL,
     intensity INTEGER,
     notes TEXT,
     confidence REAL,
@@ -202,6 +204,8 @@ MIGRATIONS: dict[str, dict[str, str]] = {
         "source_message_id": "INTEGER",
         "date": "TEXT",
         "entry_date": "TEXT",
+        "distance_km": "REAL",
+        "pace": "REAL",
         "confidence": "REAL",
     },
     "wellbeing_logs": {
@@ -367,8 +371,9 @@ class LifeDatabase:
                         """
                         INSERT INTO workout_logs
                         (raw_message_id, source_message_id, date, entry_date, workout_type, duration_min,
+                         distance_km, pace,
                          intensity, notes, confidence, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             raw_id,
@@ -377,6 +382,8 @@ class LifeDatabase:
                             log_date,
                             item.workout_type,
                             item.duration_min,
+                            item.distance_km,
+                            item.pace,
                             item.intensity,
                             item.notes,
                             item.confidence,
@@ -703,10 +710,12 @@ def _duplicate_workout(connection: Any, log_date: str, item: Any) -> bool:
         WHERE date = ?
           AND COALESCE(workout_type, '') = COALESCE(?, '')
           AND duration_min IS ?
+          AND distance_km IS ?
+          AND pace IS ?
           AND intensity IS ?
         LIMIT 1
         """,
-        (log_date, item.workout_type, item.duration_min, item.intensity),
+        (log_date, item.workout_type, item.duration_min, item.distance_km, item.pace, item.intensity),
     )
 
 

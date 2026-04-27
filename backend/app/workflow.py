@@ -7,7 +7,7 @@ from typing import Any, Literal, TypedDict
 from backend.app.briefing import Briefing, BriefingService, is_briefing_request
 from backend.app.db import LifeDatabase
 from backend.app.deletion import DeleteResult, handle_delete_request, is_delete_request
-from backend.app.extraction import is_non_logging_reply
+from backend.app.extraction import contains_non_logging_reply, is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService, is_memory_request
 from backend.app.plotting import PlotResult, PlotService, parse_plot_requests
@@ -130,6 +130,8 @@ class AgentWorkflow:
 
     async def _classify(self, state: WorkflowState) -> WorkflowState:
         text = state["text"]
+        if contains_non_logging_reply(text) and is_briefing_request(text):
+            return {"intent": "briefing"}
         if is_non_logging_reply(text):
             return {"intent": "ignore"}
         if is_memory_request(text):
@@ -269,8 +271,15 @@ def format_log_confirmation(
 
     if parsed.workout:
         workout = parsed.workout.workout_type or "workout"
-        duration = f", {parsed.workout.duration_min:g} min" if parsed.workout.duration_min else ""
-        lines.append(f"Workout: {workout}{duration}")
+        details = []
+        if parsed.workout.distance_km is not None:
+            details.append(f"{parsed.workout.distance_km:g} km")
+        if parsed.workout.pace is not None:
+            details.append(f"pace {parsed.workout.pace:g}")
+        if parsed.workout.duration_min is not None:
+            details.append(f"{parsed.workout.duration_min:g} min")
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(f"Workout: {workout}{suffix}")
         for exercise in parsed.workout.exercises[:5]:
             if exercise.sets and exercise.reps:
                 load = f" at {exercise.load}" if exercise.load else ""

@@ -186,3 +186,19 @@ class StorageTests(TestCase):
             self.assertTrue(any(item["kind"] == "raw_messages" for item in candidates))
             self.assertTrue(any(item["kind"] == "career" for item in candidates))
             self.assertTrue(all("summary" in item for item in candidates))
+
+    def test_saves_running_distance_and_pace(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            message = MessageIn(
+                text="i ran for 5km with a pace of 5.5",
+                entry_date=date(2026, 4, 27),
+                source="telegram",
+            )
+
+            db.save_message(message, extract_daily_log(message.text, message.entry_date))
+            workout = db.recent_logs()["workout"][0]
+
+            self.assertEqual(workout["workout_type"], "running")
+            self.assertEqual(workout["distance_km"], 5)
+            self.assertEqual(workout["pace"], 5.5)
