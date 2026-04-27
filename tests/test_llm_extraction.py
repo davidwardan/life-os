@@ -133,6 +133,32 @@ class FakeLangExtractClient:
         ]
 
 
+class MetaReplyLangExtractClient:
+    async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
+        return [
+            FakeLangExtraction(
+                extraction_class="wellbeing_metric",
+                extraction_text="slept for 7 hours",
+                attributes={"metric": "sleep_hours", "value": 7, "unit": "h"},
+            ),
+            FakeLangExtraction(
+                extraction_class="meal",
+                extraction_text="i think i already provide my meals",
+                attributes={"description": "i think i already provide my meals"},
+            ),
+            FakeLangExtraction(
+                extraction_class="already_answered",
+                extraction_text="i think i already provide my meals",
+                attributes={"field": "nutrition"},
+            ),
+            FakeLangExtraction(
+                extraction_class="followup_answer",
+                extraction_text="i slept for 7 hours and i think i already provide my meals",
+                attributes={"fields": ["sleep", "nutrition"]},
+            ),
+        ]
+
+
 class BrokenLangExtractClient:
     async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
         raise RuntimeError("langextract unavailable")
@@ -198,6 +224,23 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertEqual(parsed.workout.exercises[0].load, "100 kg")
         self.assertEqual(parsed.career[0].project, "Life OS")
         self.assertEqual(parsed.journal.tags, ["focus"])
+
+    async def test_langextract_validation_rejects_meta_reply_as_meal(self) -> None:
+        service = ExtractionService(
+            mode="langextract",
+            langextract_client=MetaReplyLangExtractClient(),
+        )
+
+        parsed, method, error = await service.extract(
+            "i slept for 7 hours and i think i already provide my meals",
+            date(2026, 4, 27),
+        )
+
+        self.assertEqual(method, "langextract")
+        self.assertIsNone(error)
+        self.assertEqual(parsed.wellbeing.sleep_hours, 7)
+        self.assertEqual(parsed.nutrition, [])
+        self.assertIsNone(parsed.journal)
 
     async def test_langextract_mode_falls_back_when_extractor_fails(self) -> None:
         service = ExtractionService(
