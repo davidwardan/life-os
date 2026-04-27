@@ -61,6 +61,21 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "logged")
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
+    async def test_combined_no_more_info_and_briefing_routes_to_briefing(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            workflow = _workflow(db)
+
+            result = await workflow.process_text(
+                "no more info and provide me with morning brief",
+                source="telegram",
+                entry_date=date(2026, 4, 27),
+            )
+
+            self.assertEqual(result.status, "briefing_sent")
+            self.assertIsNotNone(result.briefing)
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
+
 
 def _workflow(db: LifeDatabase) -> AgentWorkflow:
     memory = MemoryService(db)

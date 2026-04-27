@@ -50,6 +50,8 @@ class WorkoutEntry(BaseModel):
 
     workout_type: str | None = Field(default=None, alias="type")
     duration_min: float | None = Field(default=None, ge=0)
+    distance_km: float | None = Field(default=None, ge=0)
+    pace: float | None = Field(default=None, ge=0)
     intensity: int | None = Field(default=None, ge=1, le=10)
     notes: str | None = None
     exercises: list[ExerciseEntry] = Field(default_factory=list)

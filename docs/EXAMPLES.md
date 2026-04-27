@@ -115,6 +115,36 @@ Life OS sends a separate image for each line. Plot requests are not stored as da
 
 The app routes Telegram messages through the workflow layer first, so plot, briefing, memory, and delete commands are handled before a message can become a raw daily log.
 
+Combined commands are also routed before logging:
+
+```text
+no more info and provide me with morning brief
+```
+
+This dismisses the follow-up and sends the briefing instead of creating a new daily log.
+
+## Running Logs
+
+Running and cardio logs use cardio-specific fields instead of gym exercise prompts:
+
+```text
+i ran for 5km with a pace of 5.5 yet i am destroyed stress level low but energy level also low
+```
+
+Extracted:
+
+```text
+workout_logs
+- type: running
+- distance_km: 5
+- pace: 5.5
+
+daily_checkins
+- energy: 3
+- stress: 3
+- notes: felt destroyed after training
+```
+
 Supported commands include:
 
 ```text

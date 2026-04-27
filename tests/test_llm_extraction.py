@@ -67,6 +67,26 @@ class BrokenLLMClient:
         return {"not": "valid"}
 
 
+class IncompleteRunningLLMClient:
+    async def extract(self, text: str, entry_date: date) -> dict[str, object]:
+        return {
+            "date": entry_date.isoformat(),
+            "nutrition": [],
+            "workout": {
+                "workout_type": "running",
+                "duration_min": None,
+                "intensity": None,
+                "notes": None,
+                "exercises": [],
+                "confidence": 0.8,
+            },
+            "wellbeing": None,
+            "career": [],
+            "journal": {"text": text, "tags": [], "sentiment": None},
+            "clarification_questions": [],
+        }
+
+
 class FakeLangExtractClient:
     async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
         return [
@@ -236,6 +256,23 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertEqual(method, "deterministic")
         self.assertIn("LLM extraction failed", error)
         self.assertEqual(parsed.workout.workout_type, "legs")
+
+    async def test_llm_output_is_reconciled_with_obvious_deterministic_signals(self) -> None:
+        service = ExtractionService(mode="llm", llm_client=IncompleteRunningLLMClient())
+
+        parsed, method, error = await service.extract(
+            "i ran for 5km with a pace of 5.5 yet i am destroyed "
+            "stress level low but energy level also low",
+            date(2026, 4, 27),
+        )
+
+        self.assertEqual(method, "llm")
+        self.assertIsNone(error)
+        self.assertEqual(parsed.workout.distance_km, 5)
+        self.assertEqual(parsed.workout.pace, 5.5)
+        self.assertEqual(parsed.wellbeing.energy, 3)
+        self.assertEqual(parsed.wellbeing.stress, 3)
+        self.assertEqual(parsed.clarification_questions, [])
 
     async def test_openrouter_client_tries_fallback_models(self) -> None:
         client = FallbackOpenRouterClient()
