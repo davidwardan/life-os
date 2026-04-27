@@ -45,6 +45,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Long-term memory for explicit preferences, strategies, goals, and briefing style
 - OpenRouter-backed LLM extraction with deterministic fallback
 - Experimental LangExtract grounded extraction through OpenRouter-compatible models
+- LangGraph-backed workflow routing for logging, memory, deletion, briefings, and plots
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
 - Multi-line Telegram plot batches

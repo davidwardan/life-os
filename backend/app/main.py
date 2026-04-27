@@ -14,6 +14,7 @@ from backend.app.memory import MemoryService
 from backend.app.plotting import PlotRequest, PlotService, supported_plots
 from backend.app.schemas import ExtractionStatus, LoggedMessage, MessageIn, TelegramStatus
 from backend.app.telegram import make_telegram_service, verify_telegram_secret
+from backend.app.workflow import AgentWorkflow
 
 
 app = FastAPI(title="Life OS", version="0.1.0")
@@ -24,6 +25,13 @@ extractor = ExtractionService()
 plotter = PlotService(db)
 memory_service = MemoryService(db)
 briefing_service = BriefingService(db, memory_service=memory_service)
+workflow = AgentWorkflow(
+    db=db,
+    extractor=extractor,
+    plotter=plotter,
+    memory_service=memory_service,
+    briefing_service=briefing_service,
+)
 telegram_service = make_telegram_service(db, extractor)
 
 
@@ -68,15 +76,19 @@ def telegram_status() -> TelegramStatus:
 
 @app.post("/api/messages", response_model=LoggedMessage)
 async def create_message(message: MessageIn) -> LoggedMessage:
-    parsed, method, error = await extractor.extract(message.text, message.entry_date)
-    saved = db.save_message(message, parsed)
-    memory_service.learn_from_message(message.text, parsed, saved["raw_message_id"])
+    result = await workflow.log_text(
+        message.text,
+        source=message.source,
+        entry_date=message.entry_date,
+    )
+    if result.raw_message_id is None or result.parsed is None:
+        raise HTTPException(status_code=500, detail="Workflow did not return a logged message")
     return LoggedMessage(
-        raw_message_id=saved["raw_message_id"],
-        parsed=parsed,
-        records=saved["records"],
-        extraction_method=method,
-        extraction_error=error,
+        raw_message_id=result.raw_message_id,
+        parsed=result.parsed,
+        records=result.records or {},
+        extraction_method=result.extraction_method or "unknown",
+        extraction_error=result.extraction_error,
     )
 
 

@@ -113,6 +113,8 @@ plot protein for the last week
 
 Life OS sends a separate image for each line. Plot requests are not stored as daily logs.
 
+The app routes Telegram messages through the workflow layer first, so plot, briefing, memory, and delete commands are handled before a message can become a raw daily log.
+
 Supported commands include:
 
 ```text
