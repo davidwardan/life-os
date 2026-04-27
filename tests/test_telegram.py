@@ -52,7 +52,8 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(result.status, "logged")
             self.assertEqual(result.extraction_method, "deterministic")
             self.assertEqual(client.sent[0][0], 456)
-            self.assertIn("Logged #1", client.sent[0][1])
+            self.assertIn("Logged Apr", client.sent[0][1])
+            self.assertIn("as #1", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
     async def test_confirmation_includes_bounded_followup_for_vague_log(self) -> None:
@@ -152,7 +153,7 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "ignored_non_logging_reply")
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
-            self.assertIn("leave that log as-is", client.sent[0][1])
+            self.assertIn("left the log unchanged", client.sent[0][1])
 
     async def test_plot_request_sends_photo_without_logging_message(self) -> None:
         with TemporaryDirectory() as directory:
@@ -242,7 +243,7 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertIn("Career hours", client.photos[1][2])
             self.assertIn("Workout duration", client.photos[2][2])
             self.assertIn("Protein", client.photos[3][2])
-            self.assertEqual(client.sent[0], (456, "Sent 4 plots."))
+            self.assertEqual(client.sent[0], (456, "I made 4 plots."))
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
     async def test_briefing_request_sends_briefing_without_logging_message(self) -> None:
@@ -331,7 +332,7 @@ class TelegramTests(IsolatedAsyncioTestCase):
 
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "memory_updated")
-            self.assertIn("Memory updated", client.sent[0][1])
+            self.assertIn("I will remember", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
     async def test_delete_request_lists_recent_logs_without_logging_message(self) -> None:

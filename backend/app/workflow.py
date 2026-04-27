@@ -149,7 +149,7 @@ class AgentWorkflow:
             "result": WorkflowResult(
                 ok=True,
                 status="ignored_non_logging_reply",
-                confirmation="No problem. I will leave that log as-is.",
+                confirmation="Got it. I left the log unchanged.",
             )
         }
 
@@ -194,7 +194,7 @@ class AgentWorkflow:
         requests = parse_plot_requests(state["text"])
         plots = tuple(self.plotter.generate(request) for request in requests)
         captions = [f"{plot.title} ({plot.detail})" for plot in plots]
-        confirmation = captions[0] if len(captions) == 1 else f"Sent {len(captions)} plots."
+        confirmation = captions[0] if len(captions) == 1 else f"I made {len(captions)} plots."
         return {
             "result": WorkflowResult(
                 ok=True,
@@ -214,7 +214,7 @@ class AgentWorkflow:
         learned = self.memory_service.learn_from_message(state["text"], parsed, saved["raw_message_id"])
         confirmation = format_log_confirmation(saved["raw_message_id"], parsed, method, error)
         if learned:
-            confirmation += f"\nMemory: updated {len(learned)} item(s)."
+            confirmation += "\n" + format_learned_memory_note(learned)
         return {
             "result": WorkflowResult(
                 ok=True,
@@ -240,7 +240,7 @@ def format_log_confirmation(
     method: str,
     error: str | None,
 ) -> str:
-    lines = [f"Logged #{raw_message_id} for {parsed.date:%b %-d} via {method}."]
+    lines = [f"Logged {parsed.date:%b %-d} as #{raw_message_id}."]
     if parsed.wellbeing:
         wellbeing = []
         if parsed.wellbeing.sleep_hours is not None:
@@ -305,14 +305,21 @@ def format_log_confirmation(
         for question in parsed.clarification_questions[:2]:
             lines.append(f"- {question}")
     if error:
-        lines.append(f"Fallback note: {error}")
+        lines.append(f"Extraction note: {method} fallback handled this because {error}")
     return "\n".join(lines)
 
 
 def format_memory_confirmation(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "I did not find a durable preference or strategy to remember. Try: remember that briefings should be direct and concise."
-    lines = [f"Memory updated: {len(items)} item(s)."]
+        return "I did not find a durable preference or strategy to remember. Try phrasing it as: remember that briefings should be direct and concise."
+    lines = [f"I will remember {len(items)} item(s)."]
     for item in items[:4]:
         lines.append(f"- {item['category']}: {item['value']}")
     return "\n".join(lines)
+
+
+def format_learned_memory_note(items: list[dict[str, Any]]) -> str:
+    if len(items) == 1:
+        item = items[0]
+        return f"Also remembered: {item['value']}."
+    return f"Also remembered {len(items)} durable preferences or strategies."
