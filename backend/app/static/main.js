@@ -10,9 +10,32 @@ const tone = document.querySelector("#tone");
 const assumption = document.querySelector("#assumption");
 const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 
+const MODE_ASSUMPTIONS = {
+  auto: "Auto mode will route the message from its wording.",
+  log: "Log mode stores the text even if it looks like a command.",
+  briefing: "Brief mode treats the text as a summary request.",
+  plot: "Plot mode expects a chart request and leaves logs unchanged.",
+  memory: "Memory mode looks for durable preferences and strategies.",
+};
+const MODE_STATUS = {
+  auto: "Routing",
+  log: "Logging",
+  briefing: "Briefing",
+  plot: "Plotting",
+  memory: "Remembering",
+};
+const DONE_STATUS = {
+  logged: "Logged",
+  memory_updated: "Remembered",
+  briefing_sent: "Briefed",
+  plot_sent: "Plotted",
+  ignored_non_logging_reply: "Unchanged",
+};
+const TONE_VALUES = Array.from(tone.options).map((option) => option.value);
+
 entryDate.valueAsDate = new Date();
-let activeMode = localStorage.getItem("life-os-mode") || "auto";
-tone.value = localStorage.getItem("life-os-tone") || "balanced";
+let activeMode = storedChoice("life-os-mode", "auto", Object.keys(MODE_ASSUMPTIONS));
+tone.value = storedChoice("life-os-tone", "balanced", TONE_VALUES);
 setMode(activeMode);
 
 submit.addEventListener("click", async () => {
@@ -107,36 +130,15 @@ function setMode(mode) {
   for (const button of modeButtons) {
     button.classList.toggle("active", button.dataset.mode === activeMode);
   }
-  const assumptions = {
-    auto: "Auto mode will route the message from its wording.",
-    log: "Log mode stores the text even if it looks like a command.",
-    briefing: "Brief mode treats the text as a summary request.",
-    plot: "Plot mode expects a chart request and leaves logs unchanged.",
-    memory: "Memory mode looks for durable preferences and strategies.",
-  };
-  assumption.textContent = assumptions[activeMode] || assumptions.auto;
+  assumption.textContent = MODE_ASSUMPTIONS[activeMode] || MODE_ASSUMPTIONS.auto;
 }
 
 function statusForMode(mode) {
-  const labels = {
-    auto: "Routing",
-    log: "Logging",
-    briefing: "Briefing",
-    plot: "Plotting",
-    memory: "Remembering",
-  };
-  return labels[mode] || "Working";
+  return MODE_STATUS[mode] || "Working";
 }
 
 function doneStatus(status) {
-  const labels = {
-    logged: "Logged",
-    memory_updated: "Remembered",
-    briefing_sent: "Briefed",
-    plot_sent: "Plotted",
-    ignored_non_logging_reply: "Unchanged",
-  };
-  return labels[status] || "Done";
+  return DONE_STATUS[status] || "Done";
 }
 
 function renderAgentReply(payload) {
@@ -153,10 +155,6 @@ function renderAgentReply(payload) {
     sections.push('<div class="empty">No structured data returned.</div>');
   }
   parsed.innerHTML = sections.join("");
-}
-
-function renderParsed(payload) {
-  parsed.innerHTML = parsedSections(payload).join("");
 }
 
 function parsedSections(payload) {
@@ -301,4 +299,9 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function storedChoice(key, fallback, allowed) {
+  const value = localStorage.getItem(key);
+  return allowed.includes(value) ? value : fallback;
 }

@@ -4,6 +4,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from backend.app.agent_response import process_agent_message
 from backend.app.auth import require_web_auth
 from backend.app.briefing import BriefingService
 from backend.app.config import STATIC_DIR
@@ -102,56 +103,13 @@ async def create_message(message: MessageIn) -> LoggedMessage:
 
 @app.post("/api/agent", response_model=AgentReply)
 async def agent_message(message: AgentMessageIn) -> AgentReply:
-    result = (
-        await workflow.log_text(message.text, source=message.source, entry_date=message.entry_date)
-        if message.mode == "log"
-        else await workflow.process_text(message.text, source=message.source, entry_date=message.entry_date)
-    )
-    return AgentReply(
-        ok=result.ok,
-        status=result.status,
-        mode=message.mode,
-        tone=message.tone,
-        confirmation=_apply_tone(result.confirmation, message.tone),
-        assumption=_agent_assumption(message),
-        raw_message_id=result.raw_message_id,
-        parsed=result.parsed,
-        records=result.records or {},
-        extraction_method=result.extraction_method,
-        extraction_error=result.extraction_error,
-        learned_memory_count=result.learned_memory_count,
-        plot_count=len(result.plot_results),
-    )
+    return await process_agent_message(workflow, message)
 
 
 @app.get("/api/logs")
 def list_logs(limit: int = 25) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     return {"logs": db.recent_logs(bounded_limit)}
-
-
-def _apply_tone(text: str | None, tone: str) -> str | None:
-    if text is None:
-        return None
-    if tone == "terse":
-        return text.splitlines()[0]
-    if tone == "explanatory":
-        return text
-    return text
-
-
-def _agent_assumption(message: AgentMessageIn) -> str | None:
-    if message.mode == "auto":
-        return "Auto mode routed this message from its wording."
-    if message.mode == "log":
-        return "Log mode stores this as a daily record, even if it looks like a command."
-    if message.mode == "briefing":
-        return "Briefing mode treats this as a request for a summary, not a log."
-    if message.mode == "memory":
-        return "Memory mode looks only for durable preferences, strategies, goals, and reminders."
-    if message.mode == "plot":
-        return "Plot mode expects a chart request and leaves daily logs unchanged."
-    return None
 
 
 @app.get("/api/logs/deletable")
