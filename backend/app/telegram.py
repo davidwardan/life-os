@@ -8,15 +8,13 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from backend.app.briefing import BriefingService, is_briefing_request
+from backend.app.briefing import BriefingService
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
-from backend.app.deletion import handle_delete_request, is_delete_request
-from backend.app.extraction import is_non_logging_reply
 from backend.app.llm_extraction import ExtractionService
-from backend.app.memory import MemoryService, is_memory_request
-from backend.app.plotting import PlotRequest, PlotService, parse_plot_requests
-from backend.app.schemas import MessageIn
+from backend.app.memory import MemoryService
+from backend.app.plotting import PlotService
+from backend.app.workflow import AgentWorkflow
 
 
 class TelegramClient(Protocol):
@@ -77,6 +75,7 @@ class TelegramService:
         plotter: PlotService | None = None,
         briefing_service: BriefingService | None = None,
         memory_service: MemoryService | None = None,
+        workflow: AgentWorkflow | None = None,
         client: TelegramClient | None = None,
         allowed_user_ids: frozenset[int] = settings.telegram_allowed_user_ids,
         send_confirmations: bool = settings.telegram_send_confirmations,
@@ -86,6 +85,13 @@ class TelegramService:
         self.plotter = plotter or PlotService(db)
         self.memory_service = memory_service or MemoryService(db)
         self.briefing_service = briefing_service or BriefingService(db, memory_service=self.memory_service)
+        self.workflow = workflow or AgentWorkflow(
+            db=db,
+            extractor=extractor,
+            plotter=self.plotter,
+            memory_service=self.memory_service,
+            briefing_service=self.briefing_service,
+        )
         self.client = client
         self.allowed_user_ids = allowed_user_ids
         self.send_confirmations = send_confirmations
@@ -126,87 +132,30 @@ class TelegramService:
         if not isinstance(chat_id, int):
             return TelegramResult(ok=False, status="missing_chat_id")
 
-        if is_non_logging_reply(text):
-            confirmation = "No problem. I will leave that log as-is."
-            if self.client and self.send_confirmations:
-                await self.client.send_message(chat_id, confirmation)
-            return TelegramResult(ok=True, status="ignored_non_logging_reply", confirmation=confirmation)
-
-        if is_memory_request(text):
-            learned = self.memory_service.learn_from_message(text)
-            confirmation = _memory_confirmation(learned)
-            if self.client and self.send_confirmations:
-                await self.client.send_message(chat_id, confirmation)
-            return TelegramResult(ok=True, status="memory_updated", confirmation=confirmation)
-
-        if is_delete_request(text):
-            deletion = handle_delete_request(
-                self.db,
-                text,
-                entry_date=_telegram_entry_date(message.get("date")),
-            )
-            if self.client and self.send_confirmations:
-                await self.client.send_message(chat_id, deletion.confirmation)
-            return TelegramResult(
-                ok=deletion.ok,
-                status=deletion.status,
-                confirmation=deletion.confirmation,
-                deleted_log=deletion.deleted,
-            )
-
-        if is_briefing_request(text):
-            briefing = await self.briefing_service.generate(_telegram_entry_date(message.get("date")))
-            if self.client and self.send_confirmations:
-                await self.client.send_message(chat_id, briefing.text)
-            return TelegramResult(
-                ok=True,
-                status="briefing_sent",
-                confirmation=briefing.text,
-                briefing_method=briefing.method,
-                briefing_error=briefing.error,
-            )
-
-        plot_requests = parse_plot_requests(text)
-        if plot_requests:
-            plot_paths = []
-            captions = []
-            for plot_request in plot_requests:
-                plot = self.plotter.generate(plot_request)
-                caption = f"{plot.title} ({plot.detail})"
-                plot_paths.append(str(plot.path))
-                captions.append(caption)
-                if self.client and self.send_confirmations:
-                    await self.client.send_photo(chat_id, str(plot.path), caption)
-            confirmation = captions[0] if len(captions) == 1 else f"Sent {len(captions)} plots."
-            if self.client and self.send_confirmations:
-                if len(captions) > 1:
-                    await self.client.send_message(chat_id, confirmation)
-            return TelegramResult(
-                ok=True,
-                status="plot_sent",
-                confirmation=confirmation,
-                plot_path=plot_paths[0] if plot_paths else None,
-                plot_paths=tuple(plot_paths),
-            )
-
         entry_date = _telegram_entry_date(message.get("date"))
-        parsed, method, error = await self.extractor.extract(text, entry_date)
-        saved = self.db.save_message(MessageIn(text=text, entry_date=entry_date, source="telegram"), parsed)
-        learned = self.memory_service.learn_from_message(text, parsed, saved["raw_message_id"])
-        confirmation = _confirmation(saved["raw_message_id"], parsed, method, error)
-        if learned:
-            confirmation += f"\nMemory: updated {len(learned)} item(s)."
-
+        result = await self.workflow.process_text(text, source="telegram", entry_date=entry_date)
         if self.client and self.send_confirmations:
-            await self.client.send_message(chat_id, confirmation)
+            for plot in result.plot_results:
+                await self.client.send_photo(
+                    chat_id,
+                    str(plot.path),
+                    f"{plot.title} ({plot.detail})",
+                )
+            if result.confirmation and (not result.plot_results or len(result.plot_results) > 1):
+                await self.client.send_message(chat_id, result.confirmation)
 
         return TelegramResult(
-            ok=True,
-            status="logged",
-            raw_message_id=saved["raw_message_id"],
-            confirmation=confirmation,
-            extraction_method=method,
-            extraction_error=error,
+            ok=result.ok,
+            status=result.status,
+            raw_message_id=result.raw_message_id,
+            confirmation=result.confirmation,
+            extraction_method=result.extraction_method,
+            extraction_error=result.extraction_error,
+            plot_path=str(result.plot_results[0].path) if result.plot_results else None,
+            plot_paths=tuple(str(plot.path) for plot in result.plot_results),
+            briefing_method=result.briefing.method if result.briefing else None,
+            briefing_error=result.briefing.error if result.briefing else None,
+            deleted_log=result.deletion.deleted if result.deletion else None,
         )
 
     def _reserve_update(self, update_id: int) -> bool:
@@ -269,75 +218,3 @@ def _now() -> str:
 def _is_unique_error(error: Exception) -> bool:
     message = str(error).lower()
     return isinstance(error, sqlite3.IntegrityError) or "unique" in message or "constraint" in message
-
-
-def _confirmation(raw_message_id: int, parsed, method: str, error: str | None) -> str:
-    lines = [f"Logged #{raw_message_id} for {parsed.date:%b %-d} via {method}."]
-    if parsed.wellbeing:
-        wellbeing = []
-        if parsed.wellbeing.sleep_hours is not None:
-            wellbeing.append(f"sleep {parsed.wellbeing.sleep_hours:g}h")
-        if parsed.wellbeing.energy is not None:
-            wellbeing.append(f"energy {parsed.wellbeing.energy}/10")
-        if parsed.wellbeing.stress is not None:
-            wellbeing.append(f"stress {parsed.wellbeing.stress}/10")
-        if parsed.wellbeing.mood is not None:
-            wellbeing.append(f"mood {parsed.wellbeing.mood}/10")
-        if wellbeing:
-            lines.append("Wellbeing: " + ", ".join(wellbeing))
-        if parsed.wellbeing.notes:
-            lines.append(f"Note: {parsed.wellbeing.notes}")
-
-    if parsed.nutrition:
-        lines.append("Nutrition:")
-        for item in parsed.nutrition[:4]:
-            meal = f"{item.meal_type}: " if item.meal_type else ""
-            macro_bits = []
-            if item.calories is not None:
-                macro_bits.append(f"{item.calories:g} cal")
-            if item.protein_g is not None:
-                marker = "~" if item.estimated else ""
-                macro_bits.append(f"{marker}{item.protein_g:g}g protein")
-            suffix = f" ({', '.join(macro_bits)})" if macro_bits else ""
-            lines.append(f"- {meal}{item.description}{suffix}")
-
-    if parsed.workout:
-        workout = parsed.workout.workout_type or "workout"
-        duration = f", {parsed.workout.duration_min:g} min" if parsed.workout.duration_min else ""
-        lines.append(f"Workout: {workout}{duration}")
-        for exercise in parsed.workout.exercises[:5]:
-            if exercise.sets and exercise.reps:
-                load = f" at {exercise.load}" if exercise.load else ""
-                lines.append(f"- {exercise.name}: {exercise.sets}x{exercise.reps}{load}")
-            elif exercise.duration_min:
-                lines.append(f"- {exercise.name}: {exercise.duration_min:g} min")
-
-    if parsed.career:
-        lines.append("Career:")
-        for item in parsed.career[:3]:
-            duration = f"{item.duration_hours:g}h " if item.duration_hours is not None else ""
-            project = item.project or "work"
-            progress = f" - {item.progress_note}" if item.progress_note else ""
-            lines.append(f"- {duration}on {project}{progress}")
-
-    if parsed.journal:
-        tag_text = f" [{', '.join(parsed.journal.tags)}]" if parsed.journal.tags else ""
-        lines.append(f"Journal: saved{tag_text}")
-
-    if parsed.clarification_questions:
-        label = "Question" if len(parsed.clarification_questions) == 1 else "Questions"
-        lines.append(label + ":")
-        for question in parsed.clarification_questions[:2]:
-            lines.append(f"- {question}")
-    if error:
-        lines.append(f"Fallback note: {error}")
-    return "\n".join(lines)
-
-
-def _memory_confirmation(items: list[dict[str, Any]]) -> str:
-    if not items:
-        return "I did not find a durable preference or strategy to remember. Try: remember that briefings should be direct and concise."
-    lines = [f"Memory updated: {len(items)} item(s)."]
-    for item in items[:4]:
-        lines.append(f"- {item['category']}: {item['value']}")
-    return "\n".join(lines)
