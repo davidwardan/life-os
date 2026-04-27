@@ -11,6 +11,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "matplotlib>=3.8",
     "libsql>=0.1.11",
+    "langextract[openai]>=1.2.1",
 ]
 
 [project.optional-dependencies]

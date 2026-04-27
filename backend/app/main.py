@@ -41,8 +41,18 @@ def health() -> dict[str, str]:
 def extraction_status() -> ExtractionStatus:
     return ExtractionStatus(
         mode=settings.extractor,
-        configured=bool(settings.openrouter_api_key) if settings.extractor in {"llm", "auto"} else True,
-        model=settings.openrouter_model if settings.extractor in {"llm", "auto"} else None,
+        configured=(
+            bool(settings.openrouter_api_key)
+            if settings.extractor in {"llm", "auto", "langextract"}
+            else True
+        ),
+        model=(
+            settings.langextract_model
+            if settings.extractor == "langextract" or settings.langextract_enabled
+            else settings.openrouter_model
+            if settings.extractor in {"llm", "auto"}
+            else None
+        ),
     )
 
 

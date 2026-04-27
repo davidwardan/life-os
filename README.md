@@ -44,6 +44,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Controlled log deletion from the web app or Telegram
 - Long-term memory for explicit preferences, strategies, goals, and briefing style
 - OpenRouter-backed LLM extraction with deterministic fallback
+- Experimental LangExtract grounded extraction through OpenRouter-compatible models
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
 - Multi-line Telegram plot batches
@@ -103,6 +104,8 @@ LIFE_OS_TIMEZONE=America/Toronto
 LIFE_OS_WEB_USERNAME=life-os
 LIFE_OS_WEB_PASSWORD=
 LIFE_OS_REQUIRE_WEB_AUTH=false
+LIFE_OS_ENABLE_LANGEXTRACT=false
+LIFE_OS_LANGEXTRACT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
@@ -121,6 +124,20 @@ TURSO_AUTH_TOKEN=
 ```
 
 Set `LIFE_OS_WEB_PASSWORD` in production. On Render, web auth is required by default; if the password is missing, the dashboard and normal API routes fail closed instead of becoming public. `/health` stays open for Render health checks, and `/api/telegram/webhook` stays open to Telegram but remains protected by `TELEGRAM_WEBHOOK_SECRET`.
+
+To try grounded extraction through LangExtract and OpenRouter:
+
+```text
+LIFE_OS_ENABLE_LANGEXTRACT=true
+```
+
+or make it the explicit extractor:
+
+```text
+LIFE_OS_EXTRACTOR=langextract
+```
+
+LangExtract uses the same `OPENROUTER_API_KEY` and OpenAI-compatible `OPENROUTER_BASE_URL`.
 
 For local Telegram testing with ngrok:
 

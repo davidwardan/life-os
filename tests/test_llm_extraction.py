@@ -1,8 +1,17 @@
 from datetime import date
+from dataclasses import dataclass
 from unittest import IsolatedAsyncioTestCase
 
 from backend.app.llm_extraction import ExtractionService
 from backend.app.llm_extraction import OpenRouterClient
+
+
+@dataclass
+class FakeLangExtraction:
+    extraction_class: str
+    extraction_text: str
+    attributes: dict[str, object]
+    char_interval: tuple[int, int] = (0, 1)
 
 
 class FakeLLMClient:
@@ -58,6 +67,62 @@ class BrokenLLMClient:
         return {"not": "valid"}
 
 
+class FakeLangExtractClient:
+    async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
+        return [
+            FakeLangExtraction(
+                extraction_class="wellbeing_metric",
+                extraction_text="energy 8/10",
+                attributes={"metric": "energy", "value": 8, "confidence": 0.9},
+            ),
+            FakeLangExtraction(
+                extraction_class="meal",
+                extraction_text="chicken rice bowl",
+                attributes={
+                    "meal_type": "lunch",
+                    "description": "chicken rice bowl",
+                    "calories": 650,
+                    "estimated": True,
+                    "confidence": 0.7,
+                },
+            ),
+            FakeLangExtraction(
+                extraction_class="workout",
+                extraction_text="lower body",
+                attributes={"workout_type": "lower body"},
+            ),
+            FakeLangExtraction(
+                extraction_class="exercise",
+                extraction_text="squats 3x10 at 100 kg",
+                attributes={"name": "squat", "sets": 3, "reps": 10, "load": "100 kg"},
+            ),
+            FakeLangExtraction(
+                extraction_class="career",
+                extraction_text="Worked 2 hours on Life OS",
+                attributes={
+                    "project": "Life OS",
+                    "activity": "development",
+                    "duration_hours": 2,
+                },
+            ),
+            FakeLangExtraction(
+                extraction_class="journal",
+                extraction_text="felt focused",
+                attributes={"text": "felt focused", "tags": ["focus"]},
+            ),
+        ]
+
+
+class BrokenLangExtractClient:
+    async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
+        raise RuntimeError("langextract unavailable")
+
+
+class EmptyLangExtractClient:
+    async def extract(self, text: str, entry_date: date) -> list[FakeLangExtraction]:
+        return []
+
+
 class FallbackOpenRouterClient(OpenRouterClient):
     def __init__(self) -> None:
         super().__init__(
@@ -91,6 +156,59 @@ class FallbackOpenRouterClient(OpenRouterClient):
 
 
 class LLMExtractionTests(IsolatedAsyncioTestCase):
+    async def test_langextract_mode_maps_grounded_extractions(self) -> None:
+        service = ExtractionService(
+            mode="langextract",
+            langextract_client=FakeLangExtractClient(),
+        )
+
+        parsed, method, error = await service.extract(
+            "energy 8/10. chicken rice bowl. lower body squats 3x10 at 100 kg. "
+            "Worked 2 hours on Life OS. felt focused",
+            date(2026, 4, 25),
+        )
+
+        self.assertEqual(method, "langextract")
+        self.assertIsNone(error)
+        self.assertEqual(parsed.wellbeing.energy, 8)
+        self.assertEqual(parsed.nutrition[0].description, "chicken rice bowl")
+        self.assertTrue(parsed.nutrition[0].estimated)
+        self.assertEqual(parsed.workout.workout_type, "lower body")
+        self.assertEqual(parsed.workout.exercises[0].sets, 3)
+        self.assertEqual(parsed.workout.exercises[0].load, "100 kg")
+        self.assertEqual(parsed.career[0].project, "Life OS")
+        self.assertEqual(parsed.journal.tags, ["focus"])
+
+    async def test_langextract_mode_falls_back_when_extractor_fails(self) -> None:
+        service = ExtractionService(
+            mode="langextract",
+            langextract_client=BrokenLangExtractClient(),
+        )
+
+        parsed, method, error = await service.extract(
+            "Ate eggs. Energy 7.",
+            date(2026, 4, 25),
+        )
+
+        self.assertEqual(method, "deterministic")
+        self.assertIn("LangExtract failed", error)
+        self.assertEqual(parsed.wellbeing.energy, 7)
+
+    async def test_langextract_mode_falls_back_on_empty_extractions(self) -> None:
+        service = ExtractionService(
+            mode="langextract",
+            langextract_client=EmptyLangExtractClient(),
+        )
+
+        parsed, method, error = await service.extract(
+            "Ate eggs. Energy 7.",
+            date(2026, 4, 25),
+        )
+
+        self.assertEqual(method, "deterministic")
+        self.assertIn("no grounded extractions", error)
+        self.assertEqual(parsed.nutrition[0].description, "eggs")
+
     async def test_validates_fake_llm_output(self) -> None:
         service = ExtractionService(mode="llm", llm_client=FakeLLMClient())
 
