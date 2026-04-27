@@ -78,6 +78,61 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             self.assertIsNotNone(result.briefing)
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
+    async def test_followup_answer_does_not_store_meta_meal(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Breakfast was oatmeal. Lunch was chicken with rice. Energy 7 stress 6 mood 7.",
+                    entry_date=date(2026, 4, 27),
+                    source="api",
+                ),
+                extract_daily_log(
+                    "Breakfast was oatmeal. Lunch was chicken with rice. Energy 7 stress 6 mood 7.",
+                    date(2026, 4, 27),
+                ),
+            )
+            workflow = _workflow(db)
+
+            result = await workflow.process_text(
+                "i slept for 7 hours and i think i already provide my meals",
+                source="whatsapp",
+                entry_date=date(2026, 4, 27),
+            )
+
+            self.assertEqual(result.status, "logged")
+            self.assertIn("sleep 7h", result.confirmation or "")
+            self.assertNotIn("i think i already provide my meals", result.confirmation or "")
+            self.assertEqual(result.parsed.nutrition, [])
+            self.assertFalse(
+                any("meal" in question.lower() for question in result.parsed.clarification_questions)
+            )
+
+    async def test_followup_answer_uses_existing_wellbeing_to_avoid_repeat_question(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            db.save_message(
+                MessageIn(
+                    text="Energy 7 stress 6 mood 7.",
+                    entry_date=date(2026, 4, 27),
+                    source="api",
+                ),
+                extract_daily_log("Energy 7 stress 6 mood 7.", date(2026, 4, 27)),
+            )
+            workflow = _workflow(db)
+
+            result = await workflow.process_text(
+                "i slept for 7 hours",
+                source="whatsapp",
+                entry_date=date(2026, 4, 27),
+            )
+
+            self.assertEqual(result.status, "logged")
+            self.assertIn("sleep 7h", result.confirmation or "")
+            self.assertFalse(
+                any("energy" in question.lower() or "stress" in question.lower() for question in result.parsed.clarification_questions)
+            )
+
 
 def _workflow(db: LifeDatabase) -> AgentWorkflow:
     memory = MemoryService(db)
