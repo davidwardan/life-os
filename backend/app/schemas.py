@@ -7,12 +7,19 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 Source = Literal["web", "telegram", "whatsapp", "openclaw", "api"]
+InteractionMode = Literal["auto", "log", "briefing", "plot", "memory"]
+InteractionTone = Literal["balanced", "terse", "explanatory"]
 
 
 class MessageIn(BaseModel):
     text: str = Field(min_length=1)
     entry_date: date | None = None
     source: Source = "web"
+
+
+class AgentMessageIn(MessageIn):
+    mode: InteractionMode = "auto"
+    tone: InteractionTone = "balanced"
 
 
 class WellbeingEntry(BaseModel):
@@ -105,6 +112,23 @@ class LoggedMessage(BaseModel):
     records: dict[str, list[dict[str, Any]]]
     extraction_method: str
     extraction_error: str | None = None
+    confirmation: str | None = None
+
+
+class AgentReply(BaseModel):
+    ok: bool
+    status: str
+    mode: InteractionMode
+    tone: InteractionTone
+    confirmation: str | None = None
+    assumption: str | None = None
+    raw_message_id: int | None = None
+    parsed: ParsedDailyLog | None = None
+    records: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    extraction_method: str | None = None
+    extraction_error: str | None = None
+    learned_memory_count: int = 0
+    plot_count: int = 0
 
 
 class ExtractionStatus(BaseModel):

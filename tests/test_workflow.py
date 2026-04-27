@@ -45,6 +45,7 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             )
 
             self.assertEqual(result.status, "memory_updated")
+            self.assertIn("I will remember", result.confirmation or "")
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
     async def test_log_text_for_web_always_logs(self) -> None:
@@ -59,6 +60,7 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             )
 
             self.assertEqual(result.status, "logged")
+            self.assertIn("Logged Apr 25 as #1.", result.confirmation or "")
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
     async def test_combined_no_more_info_and_briefing_routes_to_briefing(self) -> None:

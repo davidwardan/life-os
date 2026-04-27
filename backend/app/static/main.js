@@ -1,28 +1,37 @@
 const message = document.querySelector("#message");
 const entryDate = document.querySelector("#entryDate");
 const submit = document.querySelector("#submit");
+const clear = document.querySelector("#clear");
 const refresh = document.querySelector("#refresh");
 const parsed = document.querySelector("#parsed");
 const records = document.querySelector("#records");
 const statusNode = document.querySelector("#status");
+const tone = document.querySelector("#tone");
+const assumption = document.querySelector("#assumption");
+const modeButtons = Array.from(document.querySelectorAll("[data-mode]"));
 
 entryDate.valueAsDate = new Date();
+let activeMode = localStorage.getItem("life-os-mode") || "auto";
+tone.value = localStorage.getItem("life-os-tone") || "balanced";
+setMode(activeMode);
 
 submit.addEventListener("click", async () => {
   const text = message.value.trim();
   if (!text) {
-    setStatus("Empty");
+    setStatus("Need text");
     return;
   }
 
-  setStatus("Saving");
-  const response = await fetch("/api/messages", {
+  setStatus(statusForMode(activeMode));
+  const response = await fetch("/api/agent", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       text,
       entry_date: entryDate.value || null,
       source: "web",
+      mode: activeMode,
+      tone: tone.value,
     }),
   });
 
@@ -33,13 +42,27 @@ submit.addEventListener("click", async () => {
   }
 
   const payload = await response.json();
-  renderParsed(payload);
+  renderAgentReply(payload);
   message.value = "";
   await loadLogs();
-  setStatus("Saved");
+  setStatus(doneStatus(payload.status));
+});
+
+clear.addEventListener("click", () => {
+  message.value = "";
+  parsed.innerHTML = '<div class="empty">Stopped. The draft was cleared.</div>';
+  setStatus("Stopped");
 });
 
 refresh.addEventListener("click", loadLogs);
+tone.addEventListener("change", () => {
+  localStorage.setItem("life-os-tone", tone.value);
+});
+
+for (const button of modeButtons) {
+  button.addEventListener("click", () => setMode(button.dataset.mode));
+}
+
 records.addEventListener("click", async (event) => {
   const button = event.target.closest("[data-delete-kind]");
   if (!button) {
@@ -78,7 +101,65 @@ function setStatus(label) {
   statusNode.textContent = label;
 }
 
+function setMode(mode) {
+  activeMode = mode;
+  localStorage.setItem("life-os-mode", activeMode);
+  for (const button of modeButtons) {
+    button.classList.toggle("active", button.dataset.mode === activeMode);
+  }
+  const assumptions = {
+    auto: "Auto mode will route the message from its wording.",
+    log: "Log mode stores the text even if it looks like a command.",
+    briefing: "Brief mode treats the text as a summary request.",
+    plot: "Plot mode expects a chart request and leaves logs unchanged.",
+    memory: "Memory mode looks for durable preferences and strategies.",
+  };
+  assumption.textContent = assumptions[activeMode] || assumptions.auto;
+}
+
+function statusForMode(mode) {
+  const labels = {
+    auto: "Routing",
+    log: "Logging",
+    briefing: "Briefing",
+    plot: "Plotting",
+    memory: "Remembering",
+  };
+  return labels[mode] || "Working";
+}
+
+function doneStatus(status) {
+  const labels = {
+    logged: "Logged",
+    memory_updated: "Remembered",
+    briefing_sent: "Briefed",
+    plot_sent: "Plotted",
+    ignored_non_logging_reply: "Unchanged",
+  };
+  return labels[status] || "Done";
+}
+
+function renderAgentReply(payload) {
+  const sections = [];
+  if (payload.confirmation) {
+    sections.push(messageBlock("Reply", payload.confirmation));
+  }
+  if (payload.assumption) {
+    sections.push(messageBlock("Assumption", payload.assumption));
+  }
+  if (payload.parsed) {
+    sections.push(...parsedSections(payload));
+  } else if (!sections.length) {
+    sections.push('<div class="empty">No structured data returned.</div>');
+  }
+  parsed.innerHTML = sections.join("");
+}
+
 function renderParsed(payload) {
+  parsed.innerHTML = parsedSections(payload).join("");
+}
+
+function parsedSections(payload) {
   const sections = [];
   const data = payload.parsed;
 
@@ -113,7 +194,7 @@ function renderParsed(payload) {
     `);
   }
 
-  parsed.innerHTML = sections.join("");
+  return sections;
 }
 
 async function loadLogs() {
@@ -178,6 +259,15 @@ function recordBlock(title, item) {
     <div class="record">
       <div class="record-title"><span>${escapeHtml(title)}</span></div>
       ${fields(item)}
+    </div>
+  `;
+}
+
+function messageBlock(title, text) {
+  return `
+    <div class="record reply">
+      <div class="record-title"><span>${escapeHtml(title)}</span></div>
+      <p>${escapeHtml(text).replaceAll("\n", "<br>")}</p>
     </div>
   `;
 }
