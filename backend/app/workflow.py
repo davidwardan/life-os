@@ -23,7 +23,7 @@ from backend.app.schemas import MessageIn, ParsedDailyLog
 logger = logging.getLogger(__name__)
 
 
-Intent = Literal["ignore", "memory", "delete", "briefing", "plot", "log"]
+Intent = Literal["ignore", "memory", "delete", "briefing", "plot", "log", "chat"]
 
 
 class WorkflowState(TypedDict, total=False):
@@ -188,10 +188,15 @@ class AgentWorkflow:
             return await self._run_briefing(state)
         if intent == "plot":
             return await self._run_plot(state)
+        if intent == "chat":
+            return await self._run_chat(state)
         return await self._run_log(state)
 
     async def _classify(self, state: WorkflowState) -> WorkflowState:
         text = state["text"]
+        lower = text.lower().strip()
+        if lower in {"hey", "hi", "hello", "how are you", "how are you?", "yo"}:
+            return {"intent": "chat"}
         if contains_non_logging_reply(text) and is_briefing_request(text):
             return {"intent": "briefing"}
         if is_non_logging_reply(text):
@@ -263,6 +268,16 @@ class AgentWorkflow:
                 status="plot_sent",
                 confirmation=confirmation,
                 plot_results=plots,
+            )
+        }
+
+    async def _run_chat(self, state: WorkflowState) -> WorkflowState:
+        response = await self.extractor.chat(state["text"], context=self._planning_context(None))
+        return {
+            "result": WorkflowResult(
+                ok=True,
+                status="completed_actions",
+                confirmation=response,
             )
         }
 

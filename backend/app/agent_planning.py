@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, ValidationError
 from backend.app.config import settings
 
 
-PlannedIntent = Literal["ignore", "memory", "delete", "briefing", "plot", "log"]
+PlannedIntent = Literal["ignore", "memory", "delete", "briefing", "plot", "log", "chat"]
 
 
 PLANNER_SYSTEM_PROMPT = """
@@ -23,6 +23,7 @@ returning ordered actions. Examples:
 - "Energy 7, stress 4 and give me a brief" -> log, briefing
 - "delete my last meal and plot protein" -> delete, plot
 - "remember that I like concise briefings and log sleep 7h" -> memory, log
+- "hey how are you?" -> chat
 
 Use recent_logs and same_day_logs to decide whether the user appears to be
 repeating information that is already logged. Do not invent database changes.
@@ -34,6 +35,7 @@ Action guidance:
 - plot: the user asks for a chart, graph, or trend.
 - memory: the user asks the assistant to remember a durable preference, goal, or strategy.
 - ignore: the user declines to provide more info without asking for another action.
+- chat: the user is greeting you, asking how you are, or making general conversation that doesn't include loggable data.
 
 For each action, set text to the exact part of the message that action should
 operate on. For a log action, exclude plot/delete/briefing command text when

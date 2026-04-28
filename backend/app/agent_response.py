@@ -10,6 +10,7 @@ MODE_INTENTS: dict[str, Intent | None] = {
     "briefing": "briefing",
     "plot": "plot",
     "memory": "memory",
+    "chat": "chat",
 }
 
 MODE_ASSUMPTIONS = {
@@ -18,6 +19,7 @@ MODE_ASSUMPTIONS = {
     "briefing": "Briefing mode treats this as a request for a summary, not a log.",
     "memory": "Memory mode looks only for durable preferences, strategies, goals, and reminders.",
     "plot": "Plot mode expects a chart request and leaves daily logs unchanged.",
+    "chat": "Chat mode is for conversation and won't save any logs.",
 }
 
 

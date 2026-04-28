@@ -16,6 +16,7 @@ const MODE_ASSUMPTIONS = {
   briefing: "Brief mode treats the text as a summary request.",
   plot: "Plot mode expects a chart request and leaves logs unchanged.",
   memory: "Memory mode looks for durable preferences and strategies.",
+  chat: "Chat mode is for conversation and won't save any logs.",
 };
 const MODE_STATUS = {
   auto: "Routing",
@@ -23,6 +24,7 @@ const MODE_STATUS = {
   briefing: "Briefing",
   plot: "Plotting",
   memory: "Remembering",
+  chat: "Chatting",
 };
 const DONE_STATUS = {
   logged: "Logged",
