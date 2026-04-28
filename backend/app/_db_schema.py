@@ -155,6 +155,55 @@ CREATE TABLE IF NOT EXISTS telegram_updates (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS todoist_tasks (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    description TEXT,
+    project_id TEXT,
+    section_id TEXT,
+    parent_id TEXT,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    priority INTEGER,
+    due_date TEXT,
+    due_datetime TEXT,
+    due_timezone TEXT,
+    due_string TEXT,
+    due_recurring INTEGER NOT NULL DEFAULT 0,
+    url TEXT,
+    updated_at TEXT,
+    synced_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_todoist_tasks_due_date
+ON todoist_tasks(due_date);
+
+CREATE INDEX IF NOT EXISTS idx_todoist_tasks_priority
+ON todoist_tasks(priority);
+
+CREATE TABLE IF NOT EXISTS calendar_events (
+    calendar_id TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    calendar_summary TEXT,
+    summary TEXT,
+    description TEXT,
+    location TEXT,
+    start_at TEXT,
+    end_at TEXT,
+    start_date TEXT,
+    end_date TEXT,
+    all_day INTEGER NOT NULL DEFAULT 0,
+    status TEXT,
+    transparency TEXT,
+    event_type TEXT,
+    html_link TEXT,
+    updated_at TEXT,
+    synced_at TEXT NOT NULL,
+    PRIMARY KEY(calendar_id, event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_calendar_events_start
+ON calendar_events(start_date, start_at);
 """
 
 
@@ -224,6 +273,43 @@ MIGRATIONS: dict[str, dict[str, str]] = {
         "status": "TEXT",
         "created_at": "TEXT",
         "updated_at": "TEXT",
+    },
+    "todoist_tasks": {
+        "id": "TEXT",
+        "content": "TEXT",
+        "description": "TEXT",
+        "project_id": "TEXT",
+        "section_id": "TEXT",
+        "parent_id": "TEXT",
+        "labels_json": "TEXT NOT NULL DEFAULT '[]'",
+        "priority": "INTEGER",
+        "due_date": "TEXT",
+        "due_datetime": "TEXT",
+        "due_timezone": "TEXT",
+        "due_string": "TEXT",
+        "due_recurring": "INTEGER NOT NULL DEFAULT 0",
+        "url": "TEXT",
+        "updated_at": "TEXT",
+        "synced_at": "TEXT",
+    },
+    "calendar_events": {
+        "calendar_id": "TEXT",
+        "event_id": "TEXT",
+        "calendar_summary": "TEXT",
+        "summary": "TEXT",
+        "description": "TEXT",
+        "location": "TEXT",
+        "start_at": "TEXT",
+        "end_at": "TEXT",
+        "start_date": "TEXT",
+        "end_date": "TEXT",
+        "all_day": "INTEGER NOT NULL DEFAULT 0",
+        "status": "TEXT",
+        "transparency": "TEXT",
+        "event_type": "TEXT",
+        "html_link": "TEXT",
+        "updated_at": "TEXT",
+        "synced_at": "TEXT",
     },
 }
 

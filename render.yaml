@@ -29,6 +29,10 @@ services:
         value: nvidia/nemotron-3-nano-30b-a3b:free
       - key: TELEGRAM_SEND_CONFIRMATIONS
         value: "true"
+      - key: GOOGLE_CALENDAR_IDS
+        value: primary
+      - key: INTEGRATION_SYNC_LOOKAHEAD_DAYS
+        value: "7"
       - key: TURSO_REPLICA_PATH
         value: /tmp/life-os-turso-replica.sqlite3
       - key: TURSO_SYNC_INTERVAL_SECONDS
@@ -46,6 +50,14 @@ services:
       - key: TELEGRAM_BRIEFING_CHAT_ID
         sync: false
       - key: BRIEFING_CRON_SECRET
+        sync: false
+      - key: TODOIST_API_TOKEN
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_OAUTH_REFRESH_TOKEN
         sync: false
       - key: TURSO_DATABASE_URL
         sync: false
