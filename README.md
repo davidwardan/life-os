@@ -119,6 +119,14 @@ TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_BRIEFING_CHAT_ID=
 TELEGRAM_SEND_CONFIRMATIONS=true
+TELEGRAM_ENABLE_VOICE_NOTES=true
+TELEGRAM_VOICE_TRANSCRIPTION_BACKEND=faster-whisper
+TELEGRAM_VOICE_TRANSCRIPTION_MODEL=base
+TELEGRAM_VOICE_TRANSCRIPTION_DEVICE=cpu
+TELEGRAM_VOICE_TRANSCRIPTION_COMPUTE_TYPE=int8
+TELEGRAM_VOICE_MAX_BYTES=20971520
+TELEGRAM_VOICE_TRANSCRIPTION_API_KEY=
+TELEGRAM_VOICE_TRANSCRIPTION_BASE_URL=https://api.openai.com/v1
 BRIEFING_CRON_SECRET=
 
 TURSO_DATABASE_URL=
@@ -140,6 +148,10 @@ LIFE_OS_EXTRACTOR=langextract
 ```
 
 LangExtract uses the same `OPENROUTER_API_KEY` and OpenAI-compatible `OPENROUTER_BASE_URL`.
+
+Telegram voice notes are transcribed locally with `faster-whisper` before they enter the normal logging workflow. Keep `TELEGRAM_VOICE_TRANSCRIPTION_BACKEND=faster-whisper`, install project dependencies, and leave `TELEGRAM_ENABLE_VOICE_NOTES=true`. The first voice note downloads the configured model from Hugging Face and caches it on the machine. `base` with `cpu` and `int8` is the light default; use `small` for better accuracy if the host has enough memory. Set `TELEGRAM_ENABLE_VOICE_NOTES=false` to disable voice-note handling.
+
+If you prefer an OpenAI-compatible transcription server instead, set `TELEGRAM_VOICE_TRANSCRIPTION_BACKEND=api`, `TELEGRAM_VOICE_TRANSCRIPTION_BASE_URL`, `TELEGRAM_VOICE_TRANSCRIPTION_API_KEY`, and an API model such as `whisper-1`.
 
 For local Telegram testing with ngrok:
 

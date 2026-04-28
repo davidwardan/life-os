@@ -15,12 +15,30 @@ class FakeTelegramClient:
     def __init__(self) -> None:
         self.sent: list[tuple[int, str]] = []
         self.photos: list[tuple[int, str, str]] = []
+        self.files: dict[str, dict[str, object]] = {}
+        self.downloads: dict[str, bytes] = {}
 
     async def send_message(self, chat_id: int, text: str) -> None:
         self.sent.append((chat_id, text))
 
     async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
         self.photos.append((chat_id, photo_path, caption))
+
+    async def get_file(self, file_id: str) -> dict[str, object]:
+        return self.files[file_id]
+
+    async def download_file(self, file_path: str) -> bytes:
+        return self.downloads[file_path]
+
+
+class FakeVoiceTranscriber:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.calls: list[dict[str, object]] = []
+
+    async def transcribe(self, *, audio: bytes, filename: str, mime_type: str) -> str:
+        self.calls.append({"audio": audio, "filename": filename, "mime_type": mime_type})
+        return self.text
 
 
 class FakeHttpResponse:
@@ -162,6 +180,103 @@ class TelegramTests(IsolatedAsyncioTestCase):
 
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "ignored_non_text_message")
+
+    async def test_logs_voice_note_after_transcription(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            client = FakeTelegramClient()
+            client.files["voice-file"] = {"file_path": "voice/file_1.oga"}
+            client.downloads["voice/file_1.oga"] = b"audio-bytes"
+            transcriber = FakeVoiceTranscriber(
+                "Ate eggs. Trained legs for 30 min. Energy 7."
+            )
+            service = TelegramService(
+                db=db,
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                voice_transcriber=transcriber,
+                allowed_user_ids=frozenset({123}),
+                send_confirmations=True,
+            )
+
+            result = await service.handle_update(
+                {
+                    "update_id": 2,
+                    "message": {
+                        "message_id": 11,
+                        "date": 1777132800,
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "voice": {
+                            "file_id": "voice-file",
+                            "file_size": 128,
+                            "mime_type": "audio/ogg",
+                        },
+                    },
+                }
+            )
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.status, "logged")
+            self.assertEqual(result.transcript, "Ate eggs. Trained legs for 30 min. Energy 7.")
+            self.assertEqual(transcriber.calls[0]["audio"], b"audio-bytes")
+            self.assertEqual(transcriber.calls[0]["filename"], "file_1.oga")
+            self.assertEqual(transcriber.calls[0]["mime_type"], "audio/ogg")
+            self.assertIn("Logged Apr", client.sent[0][1])
+            logs = db.recent_logs()
+            self.assertEqual(logs["raw_messages"][0]["user_text"], result.transcript)
+
+    async def test_voice_note_reports_when_transcription_is_not_configured(self) -> None:
+        with TemporaryDirectory() as directory:
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=LifeDatabase(Path(directory) / "life.sqlite3"),
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                allowed_user_ids=frozenset({123}),
+                send_confirmations=True,
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "voice": {"file_id": "voice-file", "file_size": 128},
+                    }
+                }
+            )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "voice_notes_not_configured")
+            self.assertIn("not configured", client.sent[0][1])
+
+    async def test_voice_note_rejects_large_files_before_download(self) -> None:
+        with TemporaryDirectory() as directory:
+            client = FakeTelegramClient()
+            service = TelegramService(
+                db=LifeDatabase(Path(directory) / "life.sqlite3"),
+                extractor=ExtractionService(mode="deterministic"),
+                client=client,
+                voice_transcriber=FakeVoiceTranscriber("Energy 7."),
+                allowed_user_ids=frozenset({123}),
+                send_confirmations=True,
+                voice_max_bytes=10,
+            )
+
+            result = await service.handle_update(
+                {
+                    "message": {
+                        "from": {"id": 123},
+                        "chat": {"id": 456},
+                        "voice": {"file_id": "voice-file", "file_size": 11},
+                    }
+                }
+            )
+
+            self.assertFalse(result.ok)
+            self.assertEqual(result.status, "voice_note_too_large")
+            self.assertIn("too large", client.sent[0][1])
 
     async def test_ignores_non_logging_refusal_reply(self) -> None:
         with TemporaryDirectory() as directory:

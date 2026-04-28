@@ -50,6 +50,24 @@ class Settings:
         if value.strip()
     )
     telegram_send_confirmations: bool = _truthy(getenv("TELEGRAM_SEND_CONFIRMATIONS", "true"))
+    telegram_voice_notes_enabled: bool = _truthy(
+        getenv("TELEGRAM_ENABLE_VOICE_NOTES", "true")
+    )
+    voice_transcription_backend: str = getenv(
+        "TELEGRAM_VOICE_TRANSCRIPTION_BACKEND", "faster-whisper"
+    ).lower()
+    voice_transcription_api_key: str | None = getenv("TELEGRAM_VOICE_TRANSCRIPTION_API_KEY") or getenv(
+        "OPENAI_API_KEY"
+    )
+    voice_transcription_base_url: str = getenv(
+        "TELEGRAM_VOICE_TRANSCRIPTION_BASE_URL", "https://api.openai.com/v1"
+    )
+    voice_transcription_model: str = getenv("TELEGRAM_VOICE_TRANSCRIPTION_MODEL", "base")
+    voice_transcription_device: str = getenv("TELEGRAM_VOICE_TRANSCRIPTION_DEVICE", "cpu")
+    voice_transcription_compute_type: str = getenv(
+        "TELEGRAM_VOICE_TRANSCRIPTION_COMPUTE_TYPE", "int8"
+    )
+    telegram_voice_max_bytes: int = int(getenv("TELEGRAM_VOICE_MAX_BYTES", str(20 * 1024 * 1024)))
     turso_database_url: str | None = getenv("TURSO_DATABASE_URL")
     turso_auth_token: str | None = getenv("TURSO_AUTH_TOKEN")
     turso_replica_path: Path = Path(getenv("TURSO_REPLICA_PATH", str(TURSO_REPLICA_PATH)))

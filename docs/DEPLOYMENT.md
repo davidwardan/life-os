@@ -91,6 +91,12 @@ OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 LIFE_OS_LANGEXTRACT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-nano-30b-a3b:free
 TELEGRAM_SEND_CONFIRMATIONS=true
+TELEGRAM_ENABLE_VOICE_NOTES=true
+TELEGRAM_VOICE_TRANSCRIPTION_BACKEND=faster-whisper
+TELEGRAM_VOICE_TRANSCRIPTION_MODEL=base
+TELEGRAM_VOICE_TRANSCRIPTION_DEVICE=cpu
+TELEGRAM_VOICE_TRANSCRIPTION_COMPUTE_TYPE=int8
+TELEGRAM_VOICE_MAX_BYTES=20971520
 TURSO_REPLICA_PATH=/tmp/life-os-turso-replica.sqlite3
 TURSO_SYNC_INTERVAL_SECONDS=60
 ```
@@ -100,6 +106,8 @@ The replica path can live in `/tmp` because Turso is the durable source of truth
 `LIFE_OS_WEB_PASSWORD` protects the public Render URL with browser Basic Auth. `LIFE_OS_REQUIRE_WEB_AUTH=true` makes the app fail closed if the password is missing, so the dashboard does not become public by accident. `/health` stays open for Render health checks. `/api/telegram/webhook` also stays open to Telegram, but it is still checked against `TELEGRAM_WEBHOOK_SECRET`.
 
 `LIFE_OS_ENABLE_LANGEXTRACT=true` enables the experimental grounded extraction path. Leave it `false` until you want to compare extraction quality against the current OpenRouter JSON extractor.
+
+Telegram voice notes use local `faster-whisper` by default. The deployment must be able to install the Python dependency and download the configured model from Hugging Face on first use. `TELEGRAM_VOICE_TRANSCRIPTION_MODEL=base`, `TELEGRAM_VOICE_TRANSCRIPTION_DEVICE=cpu`, and `TELEGRAM_VOICE_TRANSCRIPTION_COMPUTE_TYPE=int8` are the lightest practical defaults for small hosts. Free Render instances may be slow for transcription because the model has to be downloaded/cached and CPU is limited.
 
 ## 4. Register The Telegram Webhook
 

@@ -29,6 +29,18 @@ services:
         value: nvidia/nemotron-3-nano-30b-a3b:free
       - key: TELEGRAM_SEND_CONFIRMATIONS
         value: "true"
+      - key: TELEGRAM_ENABLE_VOICE_NOTES
+        value: "true"
+      - key: TELEGRAM_VOICE_TRANSCRIPTION_BACKEND
+        value: faster-whisper
+      - key: TELEGRAM_VOICE_TRANSCRIPTION_MODEL
+        value: base
+      - key: TELEGRAM_VOICE_TRANSCRIPTION_DEVICE
+        value: cpu
+      - key: TELEGRAM_VOICE_TRANSCRIPTION_COMPUTE_TYPE
+        value: int8
+      - key: TELEGRAM_VOICE_MAX_BYTES
+        value: "20971520"
       - key: TURSO_REPLICA_PATH
         value: /tmp/life-os-turso-replica.sqlite3
       - key: TURSO_SYNC_INTERVAL_SECONDS
