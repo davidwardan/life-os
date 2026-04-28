@@ -12,6 +12,7 @@ from backend.app.briefing import BriefingService
 from backend.app.config import STATIC_DIR
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
+from backend.app.integrations import configured_external_sync_service
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService
 from backend.app.plotting import PlotRequest, PlotService, supported_plots
@@ -40,6 +41,7 @@ extractor = ExtractionService()
 plotter = PlotService(db)
 memory_service = MemoryService(db)
 briefing_service = BriefingService(db, memory_service=memory_service)
+external_sync_service = configured_external_sync_service(db)
 workflow = AgentWorkflow(
     db=db,
     extractor=extractor,
@@ -167,6 +169,33 @@ async def create_briefing(
             raise HTTPException(status_code=403, detail="Invalid briefing feature access secret")
         response["features"] = briefing.features
     return response
+
+
+@app.get("/api/integrations/status")
+def integrations_status() -> dict[str, object]:
+    google_calendar_oauth_configured = bool(
+        settings.google_oauth_client_id
+        and settings.google_oauth_client_secret
+        and settings.google_oauth_refresh_token
+    )
+    return {
+        "todoist_configured": bool(settings.todoist_api_token),
+        "google_calendar_configured": google_calendar_oauth_configured
+        or bool(settings.google_calendar_access_token),
+        "google_calendar_oauth_configured": google_calendar_oauth_configured,
+        "google_calendar_ids": settings.google_calendar_ids,
+        "lookahead_days": settings.integration_sync_lookahead_days,
+    }
+
+
+@app.post("/api/integrations/sync")
+async def sync_integrations(
+    x_life_os_cron_secret: str | None = Header(default=None),
+) -> dict[str, object]:
+    if settings.briefing_cron_secret and x_life_os_cron_secret != settings.briefing_cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid integrations sync secret")
+    result = await external_sync_service.sync()
+    return result.as_dict()
 
 
 @app.get("/api/memory")

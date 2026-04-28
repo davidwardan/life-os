@@ -50,7 +50,7 @@ If you send those four lines together, Life OS returns four separate chart image
 - Telegram webhook with user allowlist and webhook secret support
 - Plot generation through safe, predefined query mappings
 - Multi-line Telegram plot batches
-- Morning briefings from deterministic trend features with optional LLM wording
+- Morning briefings from deterministic trend features, Todoist tasks, calendar events, and optional LLM wording
 - Minimal local web surface served by FastAPI
 - Privacy-focused defaults: ignored `.env`, ignored local data, no arbitrary SQL from the agent
 
@@ -121,6 +121,14 @@ TELEGRAM_BRIEFING_CHAT_ID=
 TELEGRAM_SEND_CONFIRMATIONS=true
 BRIEFING_CRON_SECRET=
 
+TODOIST_API_TOKEN=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_OAUTH_REFRESH_TOKEN=
+GOOGLE_CALENDAR_IDS=primary
+INTEGRATION_SYNC_LOOKAHEAD_DAYS=7
+GOOGLE_CALENDAR_ACCESS_TOKEN=
+
 TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
@@ -140,6 +148,8 @@ LIFE_OS_EXTRACTOR=langextract
 ```
 
 LangExtract uses the same `OPENROUTER_API_KEY` and OpenAI-compatible `OPENROUTER_BASE_URL`.
+
+Todoist and Google Calendar context is optional. Set `TODOIST_API_TOKEN` for Todoist. For private Google Calendar data, set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_OAUTH_REFRESH_TOKEN`; `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are also accepted. Life OS exchanges the refresh token for short-lived access tokens before calling the Calendar API. `GOOGLE_CALENDAR_ACCESS_TOKEN` is only a fallback for one-off local testing because access tokens expire quickly. Refresh context with `POST /api/integrations/sync` and `X-Life-Os-Cron-Secret` when `BRIEFING_CRON_SECRET` is configured.
 
 For local Telegram testing with ngrok:
 

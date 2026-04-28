@@ -74,6 +74,10 @@ TELEGRAM_ALLOWED_USER_IDS=
 TELEGRAM_WEBHOOK_SECRET=
 TELEGRAM_BRIEFING_CHAT_ID=
 BRIEFING_CRON_SECRET=
+TODOIST_API_TOKEN=
+GOOGLE_CLIENT_ID=
+GOOGLE_CLIENT_SECRET=
+GOOGLE_OAUTH_REFRESH_TOKEN=
 TURSO_DATABASE_URL=
 TURSO_AUTH_TOKEN=
 ```
@@ -91,6 +95,8 @@ OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 LIFE_OS_LANGEXTRACT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-nano-30b-a3b:free
 TELEGRAM_SEND_CONFIRMATIONS=true
+GOOGLE_CALENDAR_IDS=primary
+INTEGRATION_SYNC_LOOKAHEAD_DAYS=7
 TURSO_REPLICA_PATH=/tmp/life-os-turso-replica.sqlite3
 TURSO_SYNC_INTERVAL_SECONDS=60
 ```
@@ -100,6 +106,8 @@ The replica path can live in `/tmp` because Turso is the durable source of truth
 `LIFE_OS_WEB_PASSWORD` protects the public Render URL with browser Basic Auth. `LIFE_OS_REQUIRE_WEB_AUTH=true` makes the app fail closed if the password is missing, so the dashboard does not become public by accident. `/health` stays open for Render health checks. `/api/telegram/webhook` also stays open to Telegram, but it is still checked against `TELEGRAM_WEBHOOK_SECRET`.
 
 `LIFE_OS_ENABLE_LANGEXTRACT=true` enables the experimental grounded extraction path. Leave it `false` until you want to compare extraction quality against the current OpenRouter JSON extractor.
+
+`TODOIST_API_TOKEN` and Google Calendar OAuth settings are optional. For private Google Calendar data, configure `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_OAUTH_REFRESH_TOKEN`; `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` are also accepted. Life OS exchanges the refresh token for a short-lived access token before calling the Calendar API. When any integration is set, call `POST /api/integrations/sync` with `X-Life-Os-Cron-Secret: your-briefing-secret` to refresh tasks and events before morning briefings.
 
 ## 4. Register The Telegram Webhook
 
@@ -118,6 +126,7 @@ Check:
 ```text
 https://your-life-os.onrender.com/health
 https://your-life-os.onrender.com/api/telegram/status
+https://your-life-os.onrender.com/api/integrations/status
 https://your-life-os.onrender.com/api/plots/supported
 https://your-life-os.onrender.com/api/briefing
 ```

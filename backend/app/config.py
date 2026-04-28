@@ -60,6 +60,24 @@ class Settings:
     telegram_briefing_chat_id: int | None = (
         int(value) if (value := getenv("TELEGRAM_BRIEFING_CHAT_ID")) else None
     )
+    todoist_api_token: str | None = getenv("TODOIST_API_TOKEN")
+    todoist_base_url: str = getenv("TODOIST_BASE_URL", "https://api.todoist.com/api/v1")
+    google_calendar_access_token: str | None = getenv("GOOGLE_CALENDAR_ACCESS_TOKEN")
+    google_oauth_client_id: str | None = getenv("GOOGLE_OAUTH_CLIENT_ID") or getenv(
+        "GOOGLE_CLIENT_ID"
+    )
+    google_oauth_client_secret: str | None = getenv("GOOGLE_OAUTH_CLIENT_SECRET") or getenv(
+        "GOOGLE_CLIENT_SECRET"
+    )
+    google_oauth_refresh_token: str | None = getenv("GOOGLE_OAUTH_REFRESH_TOKEN")
+    google_oauth_token_url: str = getenv(
+        "GOOGLE_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"
+    )
+    google_calendar_base_url: str = getenv(
+        "GOOGLE_CALENDAR_BASE_URL", "https://www.googleapis.com/calendar/v3"
+    )
+    google_calendar_ids: tuple[str, ...] = _split_csv(getenv("GOOGLE_CALENDAR_IDS", "primary"))
+    integration_sync_lookahead_days: int = int(getenv("INTEGRATION_SYNC_LOOKAHEAD_DAYS", "7"))
 
 
 settings = Settings()
