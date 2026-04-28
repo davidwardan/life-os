@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import sqlite3
@@ -16,13 +17,13 @@ from backend.app.memory import MemoryService
 from backend.app.plotting import PlotService
 from backend.app.workflow import AgentWorkflow
 
+logger = logging.getLogger(__name__)
+
 
 class TelegramClient(Protocol):
-    async def send_message(self, chat_id: int, text: str) -> None:
-        ...
+    async def send_message(self, chat_id: int, text: str) -> None: ...
 
-    async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None:
-        ...
+    async def send_photo(self, chat_id: int, photo_path: str, caption: str) -> None: ...
 
 
 class TelegramBotClient:
@@ -84,7 +85,9 @@ class TelegramService:
         self.extractor = extractor
         self.plotter = plotter or PlotService(db)
         self.memory_service = memory_service or MemoryService(db)
-        self.briefing_service = briefing_service or BriefingService(db, memory_service=self.memory_service)
+        self.briefing_service = briefing_service or BriefingService(
+            db, memory_service=self.memory_service
+        )
         self.workflow = workflow or AgentWorkflow(
             db=db,
             extractor=extractor,
@@ -177,15 +180,18 @@ class TelegramService:
 
     def _finish_update(self, update_id: int, status: str) -> None:
         now = _now()
-        with self.db.connect() as connection:
-            connection.execute(
-                """
-                UPDATE telegram_updates
-                SET status = ?, updated_at = ?
-                WHERE update_id = ?
-                """,
-                (status, now, update_id),
-            )
+        try:
+            with self.db.connect() as connection:
+                connection.execute(
+                    """
+                    UPDATE telegram_updates
+                    SET status = ?, updated_at = ?
+                    WHERE update_id = ?
+                    """,
+                    (status, now, update_id),
+                )
+        except Exception:
+            logger.exception("Failed to finalize telegram update %s", update_id)
 
 
 def make_telegram_service(db: LifeDatabase, extractor: ExtractionService) -> TelegramService:
@@ -217,4 +223,6 @@ def _now() -> str:
 
 def _is_unique_error(error: Exception) -> bool:
     message = str(error).lower()
-    return isinstance(error, sqlite3.IntegrityError) or "unique" in message or "constraint" in message
+    return (
+        isinstance(error, sqlite3.IntegrityError) or "unique" in message or "constraint" in message
+    )

@@ -39,7 +39,9 @@ class BriefingTests(IsolatedAsyncioTestCase):
             db = LifeDatabase(Path(directory) / "life.sqlite3")
             _seed_briefing_data(db, date(2026, 4, 25))
             memory = MemoryService(db)
-            memory.learn_from_message("Training early works for me. I don't like vague motivational advice.")
+            memory.learn_from_message(
+                "Training early works for me. I don't like vague motivational advice."
+            )
             service = BriefingService(db, memory_service=memory)
 
             briefing = await service.generate(date(2026, 4, 25))
@@ -99,4 +101,6 @@ def _seed_briefing_data(db: LifeDatabase, end_date: date) -> None:
             ],
             journal=JournalEntry(text="Focused but tired.", tags=["focus", "fatigue"]),
         )
-        db.save_message(MessageIn(text=f"seed {offset}", entry_date=entry_date, source="api"), parsed)
+        db.save_message(
+            MessageIn(text=f"seed {offset}", entry_date=entry_date, source="api"), parsed
+        )

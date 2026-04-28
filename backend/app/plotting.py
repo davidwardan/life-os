@@ -69,14 +69,30 @@ SUPPORTED_METRICS = {
 SUPPORTED_PLOTS = [
     {"metric": "energy", "title": "Energy and stress", "example": "plot my energy"},
     {"metric": "sleep_energy", "title": "Sleep vs energy", "example": "plot sleep vs energy"},
-    {"metric": "stress_workout", "title": "Stress vs workout load", "example": "show stress vs workouts"},
+    {
+        "metric": "stress_workout",
+        "title": "Stress vs workout load",
+        "example": "show stress vs workouts",
+    },
     {"metric": "workout", "title": "Workout duration", "example": "plot my workouts"},
-    {"metric": "workout_frequency", "title": "Workout frequency", "example": "show workout frequency"},
+    {
+        "metric": "workout_frequency",
+        "title": "Workout frequency",
+        "example": "show workout frequency",
+    },
     {"metric": "exercise_history", "title": "Exercise history", "example": "plot squat history"},
     {"metric": "career", "title": "Career hours", "example": "show my career hours"},
-    {"metric": "career_projects", "title": "Deep work by project", "example": "plot deep work by project"},
+    {
+        "metric": "career_projects",
+        "title": "Deep work by project",
+        "example": "plot deep work by project",
+    },
     {"metric": "protein", "title": "Protein", "example": "plot protein for the last week"},
-    {"metric": "protein_consistency", "title": "Protein consistency", "example": "show protein consistency"},
+    {
+        "metric": "protein_consistency",
+        "title": "Protein consistency",
+        "example": "show protein consistency",
+    },
     {"metric": "calories", "title": "Calories", "example": "plot calories"},
     {"metric": "data_completeness", "title": "Data completeness", "example": "show habit heatmap"},
 ]
@@ -106,7 +122,9 @@ def parse_plot_request(text: str) -> PlotRequest | None:
         word in lower for word in ("career", "work", "deep work", "hours")
     ):
         return PlotRequest(metric="career_projects", days=days)
-    if "protein" in lower and any(word in lower for word in ("consistency", "consistent", "target")):
+    if "protein" in lower and any(
+        word in lower for word in ("consistency", "consistent", "target")
+    ):
         return PlotRequest(metric="protein_consistency", days=days)
 
     for keyword, metric in (
@@ -191,8 +209,12 @@ class PlotService:
         if rows:
             energy = [row["energy"] for row in rows]
             stress = [row["stress"] for row in rows]
-            ax.plot(x_values, energy, marker="o", markersize=7, linewidth=2.6, color=INK, label="Energy")
-            ax.plot(x_values, stress, marker="o", markersize=7, linewidth=2.6, color=RED, label="Stress")
+            ax.plot(
+                x_values, energy, marker="o", markersize=7, linewidth=2.6, color=INK, label="Energy"
+            )
+            ax.plot(
+                x_values, stress, marker="o", markersize=7, linewidth=2.6, color=RED, label="Stress"
+            )
             _annotate_last(ax, x_values, energy, "energy", INK)
             _annotate_last(ax, x_values, stress, "stress", RED)
         _style_axis(ax, "Energy / Stress", "Score", rows, kicker=f"Last {days} days")
@@ -264,7 +286,9 @@ class PlotService:
             """,
             (_start_date(days),),
         )
-        return self._bar_plot(rows, "Workout duration", "Minutes", "duration_min", "workout_duration")
+        return self._bar_plot(
+            rows, "Workout duration", "Minutes", "duration_min", "workout_duration"
+        )
 
     def _workout_frequency(self, days: int) -> PlotResult:
         rows = self._rows(
@@ -389,7 +413,16 @@ class PlotService:
             for y, values in enumerate(matrix):
                 for x, value in enumerate(values):
                     if value:
-                        ax.text(x, y, "x", ha="center", va="center", color=PAPER, fontsize=8, fontweight="bold")
+                        ax.text(
+                            x,
+                            y,
+                            "x",
+                            ha="center",
+                            va="center",
+                            color=PAPER,
+                            fontsize=8,
+                            fontweight="bold",
+                        )
         _style_axis(ax, "Data Completeness", "", rows, kicker=f"Last {days} days", integer_y=False)
         ax.grid(False)
         _save(fig, path)
@@ -414,8 +447,24 @@ class PlotService:
         if rows:
             left_values = [row[left_key] for row in rows]
             right_values = [row[right_key] for row in rows]
-            ax.plot(x_values, left_values, marker="o", markersize=7, linewidth=2.6, color=INK, label=left_label)
-            ax.plot(x_values, right_values, marker="o", markersize=7, linewidth=2.6, color=RED, label=right_label)
+            ax.plot(
+                x_values,
+                left_values,
+                marker="o",
+                markersize=7,
+                linewidth=2.6,
+                color=INK,
+                label=left_label,
+            )
+            ax.plot(
+                x_values,
+                right_values,
+                marker="o",
+                markersize=7,
+                linewidth=2.6,
+                color=RED,
+                label=right_label,
+            )
             _annotate_last(ax, x_values, left_values, left_label, INK)
             _annotate_last(ax, x_values, right_values, right_label, RED)
         _style_axis(ax, title, ylabel, rows, kicker=f"Last {days} days")
@@ -588,7 +637,9 @@ def _set_date_ticks(ax, x_values: list[int], dates: list[str]) -> None:
     ax.margins(x=0.04)
 
 
-def _annotate_last(ax, x_values: list[int], values: list[float | None], label: str, color: str) -> None:
+def _annotate_last(
+    ax, x_values: list[int], values: list[float | None], label: str, color: str
+) -> None:
     if not x_values or not values or values[-1] is None:
         return
     ax.annotate(
