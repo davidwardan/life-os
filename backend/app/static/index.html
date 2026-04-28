@@ -9,7 +9,7 @@
   <body>
     <main class="shell">
       <header class="topbar">
-        <div>
+        <div class="brand">
           <p class="kicker">Life OS</p>
           <h1>Daily log</h1>
         </div>
@@ -18,7 +18,6 @@
 
       <section class="composer" aria-label="Daily log composer">
         <div class="composer-head">
-          <label for="message">Message</label>
           <div class="segmented" aria-label="Conversation mode">
             <button type="button" class="mode active" data-mode="auto">Auto</button>
             <button type="button" class="mode" data-mode="log">Log</button>
@@ -26,34 +25,39 @@
             <button type="button" class="mode" data-mode="plot">Plot</button>
             <button type="button" class="mode" data-mode="memory">Memory</button>
           </div>
-        </div>
-        <textarea
-          id="message"
-          rows="7"
-          spellcheck="true"
-          placeholder="Ate oatmeal and chicken rice. Trained upper body for 45 min. Energy 7, stress 4. Worked 2h on global LSTM paper."
-        ></textarea>
-        <div class="preference-row">
-          <label for="tone">Tone</label>
-          <select id="tone" aria-label="Reply tone">
-            <option value="balanced">Balanced</option>
-            <option value="terse">Terse</option>
-            <option value="explanatory">Explanatory</option>
-          </select>
           <p id="assumption" class="assumption">Auto mode will route the message from its wording.</p>
         </div>
-        <div class="actions">
-          <input id="entryDate" type="date" aria-label="Entry date" />
-          <button id="submit" type="button">Send</button>
-          <button id="clear" type="button" class="ghost">Stop</button>
+        
+        <textarea
+          id="message"
+          rows="1"
+          spellcheck="true"
+          placeholder="What did you do today?"
+        ></textarea>
+
+        <div class="preference-row">
+          <div class="actions">
+            <input id="entryDate" type="date" aria-label="Entry date" />
+            <div class="tone-select">
+              <label for="tone">Tone</label>
+              <select id="tone" aria-label="Reply tone">
+                <option value="balanced">Balanced</option>
+                <option value="terse">Terse</option>
+                <option value="explanatory">Explanatory</option>
+              </select>
+            </div>
+          </div>
+          <div class="main-actions">
+            <button id="clear" type="button" class="ghost">Clear</button>
+            <button id="submit" type="button">Send</button>
+          </div>
         </div>
       </section>
 
-      <section class="split">
+      <div class="split">
         <article class="panel">
           <div class="section-head">
-            <h2>Extracted</h2>
-            <button id="refresh" type="button" class="ghost">Refresh</button>
+            <h2>Latest Result</h2>
           </div>
           <div id="parsed" class="empty">No entry logged yet.</div>
         </article>
@@ -61,10 +65,11 @@
         <article class="panel">
           <div class="section-head">
             <h2>Recent records</h2>
+            <button id="refresh" type="button" class="ghost">Refresh</button>
           </div>
           <div id="records" class="record-stack"></div>
         </article>
-      </section>
+      </div>
     </main>
 
     <script src="/static/main.js"></script>
