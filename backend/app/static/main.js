@@ -30,6 +30,7 @@ const DONE_STATUS = {
   briefing_sent: "Briefed",
   plot_sent: "Plotted",
   ignored_non_logging_reply: "Unchanged",
+  completed_actions: "Completed",
 };
 const TONE_VALUES = Array.from(tone.options).map((option) => option.value);
 

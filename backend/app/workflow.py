@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal, TypedDict
 
+from backend.app.agent_planning import AgentPlan, AgentPlanner, PlannedAction, configured_agent_planner
 from backend.app.briefing import Briefing, BriefingService, is_briefing_request
 from backend.app.db import LifeDatabase
 from backend.app.deletion import DeleteResult, handle_delete_request, is_delete_request
@@ -39,6 +40,8 @@ class WorkflowResult:
     briefing: Briefing | None = None
     deletion: DeleteResult | None = None
     learned_memory_count: int = 0
+    action_results: tuple["WorkflowResult", ...] = ()
+    duplicate_note: str | None = None
 
 
 class AgentWorkflow:
@@ -49,12 +52,15 @@ class AgentWorkflow:
         plotter: PlotService,
         memory_service: MemoryService,
         briefing_service: BriefingService,
+        planner: AgentPlanner | None = None,
+        use_configured_planner: bool = True,
     ) -> None:
         self.db = db
         self.extractor = extractor
         self.plotter = plotter
         self.memory_service = memory_service
         self.briefing_service = briefing_service
+        self.planner = planner or (configured_agent_planner() if use_configured_planner else None)
         self._graph = self._build_graph()
 
     async def process_text(
@@ -70,6 +76,10 @@ class AgentWorkflow:
             state["intent"] = forced_intent
             state = await self._execute_without_graph(state)
             return state["result"]
+
+        plan = await self._plan_actions(state)
+        if plan is not None:
+            return await self._execute_plan(state, plan)
 
         if self._graph is not None:
             final_state = await self._graph.ainvoke(state)
@@ -92,6 +102,41 @@ class AgentWorkflow:
             entry_date=entry_date,
             forced_intent="log",
         )
+
+    async def _plan_actions(self, state: WorkflowState) -> AgentPlan | None:
+        if self.planner is None:
+            return None
+        try:
+            return await self.planner.plan(
+                state["text"],
+                context=self._planning_context(state.get("entry_date")),
+            )
+        except Exception:
+            return None
+
+    async def _execute_plan(self, state: WorkflowState, plan: AgentPlan) -> WorkflowResult:
+        actions = [
+            action
+            for action in plan.actions
+            if action.intent != "ignore" or len(plan.actions) == 1
+        ]
+        if not actions:
+            actions = [PlannedAction(intent="ignore", text=state["text"])]
+
+        results = []
+        for action in actions:
+            action_state: WorkflowState = {
+                "text": action.text or state["text"],
+                "source": state["source"],
+                "entry_date": state.get("entry_date"),
+                "intent": action.intent,
+            }
+            final_state = await self._execute_without_graph(action_state)
+            results.append(final_state["result"])
+
+        if len(results) == 1:
+            return results[0]
+        return _combine_action_results(tuple(results), plan)
 
     def _build_graph(self) -> Any | None:
         try:
@@ -216,13 +261,21 @@ class AgentWorkflow:
 
     async def _run_log(self, state: WorkflowState) -> WorkflowState:
         entry_date = state.get("entry_date")
-        parsed, method, error = await self.extractor.extract(state["text"], entry_date)
+        context = self._planning_context(entry_date)
+        parsed, method, error = await self.extractor.extract(
+            state["text"],
+            entry_date,
+            context=context,
+        )
         saved = self.db.save_message(
             MessageIn(text=state["text"], entry_date=entry_date, source=state["source"]),
             parsed,
         )
         learned = self.memory_service.learn_from_message(state["text"], parsed, saved["raw_message_id"])
         confirmation = format_log_confirmation(saved["raw_message_id"], parsed, method, error)
+        duplicate_note = format_duplicate_note(parsed, saved["records"])
+        if duplicate_note:
+            confirmation += "\n" + duplicate_note
         if learned:
             confirmation += "\n" + format_learned_memory_note(learned)
         return {
@@ -236,12 +289,56 @@ class AgentWorkflow:
                 extraction_method=method,
                 extraction_error=error,
                 learned_memory_count=len(learned),
+                duplicate_note=duplicate_note,
             )
+        }
+
+    def _planning_context(self, entry_date: date | None) -> dict[str, Any]:
+        logs = self.db.recent_logs(limit=40)
+        target_date = entry_date.isoformat() if entry_date else None
+        return {
+            "target_date": target_date,
+            "same_day_logs": _logs_for_date(logs, target_date),
+            "recent_logs": _compact_recent_logs(logs),
+            "memory": self.memory_service.briefing_context(),
         }
 
 
 def _route_intent(state: WorkflowState) -> Intent:
     return state.get("intent", "log")
+
+
+def _combine_action_results(results: tuple[WorkflowResult, ...], plan: AgentPlan) -> WorkflowResult:
+    confirmations = [result.confirmation for result in results if result.confirmation]
+    if plan.duplicate_hint:
+        confirmations.append(f"Context: {plan.duplicate_hint}")
+
+    records: dict[str, list[dict[str, Any]]] = {}
+    for result in results:
+        for key, values in (result.records or {}).items():
+            records.setdefault(key, []).extend(values)
+
+    return WorkflowResult(
+        ok=all(result.ok for result in results),
+        status="completed_actions",
+        confirmation="\n\n".join(confirmations) if confirmations else None,
+        raw_message_id=next((result.raw_message_id for result in results if result.raw_message_id), None),
+        parsed=next((result.parsed for result in results if result.parsed is not None), None),
+        records=records or None,
+        extraction_method=next(
+            (result.extraction_method for result in results if result.extraction_method),
+            None,
+        ),
+        extraction_error=next(
+            (result.extraction_error for result in results if result.extraction_error),
+            None,
+        ),
+        plot_results=tuple(plot for result in results for plot in result.plot_results),
+        briefing=next((result.briefing for result in results if result.briefing is not None), None),
+        deletion=next((result.deletion for result in results if result.deletion is not None), None),
+        learned_memory_count=sum(result.learned_memory_count for result in results),
+        action_results=results,
+    )
 
 
 def format_log_confirmation(
@@ -319,6 +416,24 @@ def format_log_confirmation(
     return "\n".join(lines)
 
 
+def format_duplicate_note(parsed: ParsedDailyLog, records: dict[str, list[dict[str, Any]]]) -> str | None:
+    skipped = []
+    if parsed.wellbeing and not records.get("daily_checkins"):
+        skipped.append("wellbeing")
+    if parsed.nutrition and not records.get("nutrition"):
+        skipped.append("nutrition")
+    if parsed.workout and not records.get("workout") and not records.get("workout_exercises"):
+        skipped.append("workout")
+    if parsed.career and not records.get("career"):
+        skipped.append("career")
+    if parsed.journal and not records.get("journal"):
+        skipped.append("journal")
+    if not skipped:
+        return None
+    label = ", ".join(skipped)
+    return f"Already logged: skipped duplicate structured rows for {label}."
+
+
 def format_memory_confirmation(items: list[dict[str, Any]]) -> str:
     if not items:
         return "I did not find a durable preference or strategy to remember. Try phrasing it as: remember that briefings should be direct and concise."
@@ -333,3 +448,38 @@ def format_learned_memory_note(items: list[dict[str, Any]]) -> str:
         item = items[0]
         return f"Also remembered: {item['value']}."
     return f"Also remembered {len(items)} durable preferences or strategies."
+
+
+def _logs_for_date(logs: dict[str, list[dict[str, Any]]], target_date: str | None) -> dict[str, list[dict[str, Any]]]:
+    if target_date is None:
+        return {}
+    return {
+        kind: [_compact_log_row(kind, row) for row in rows if _row_date(row) == target_date][:8]
+        for kind, rows in logs.items()
+        if kind != "raw_messages"
+    }
+
+
+def _compact_recent_logs(logs: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+    return {
+        kind: [_compact_log_row(kind, row) for row in rows[:6]]
+        for kind, rows in logs.items()
+        if kind in {"raw_messages", "nutrition", "workout", "career", "daily_checkins"}
+    }
+
+
+def _compact_log_row(kind: str, row: dict[str, Any]) -> dict[str, Any]:
+    keys = {
+        "raw_messages": ("id", "entry_date", "source", "text"),
+        "daily_checkins": ("id", "date", "sleep_hours", "energy", "stress", "mood", "notes"),
+        "nutrition": ("id", "date", "meal_type", "description", "calories", "protein_g"),
+        "workout": ("id", "date", "workout_type", "duration_min", "distance_km", "pace", "notes"),
+        "workout_exercises": ("id", "date", "name", "sets", "reps", "load", "duration_min"),
+        "career": ("id", "date", "project", "activity", "duration_hours", "progress_note"),
+        "journal": ("id", "date", "text", "tags_json"),
+    }.get(kind, ("id", "date", "entry_date"))
+    return {key: row.get(key) for key in keys if row.get(key) not in (None, "")}
+
+
+def _row_date(row: dict[str, Any]) -> str | None:
+    return row.get("date") or row.get("entry_date")

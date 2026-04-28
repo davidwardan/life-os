@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
 
+from backend.app.agent_planning import AgentPlan, PlannedAction
 from backend.app.briefing import BriefingService
 from backend.app.db import LifeDatabase
 from backend.app.extraction import extract_daily_log
@@ -78,8 +79,65 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             self.assertIsNotNone(result.briefing)
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
+    async def test_llm_plan_can_log_and_send_briefing_from_one_message(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            workflow = _workflow(
+                db,
+                planner=FakePlanner(
+                    [
+                        PlannedAction(intent="log", text="Energy 7, stress 4."),
+                        PlannedAction(intent="briefing", text="provide me with morning brief"),
+                    ]
+                ),
+            )
 
-def _workflow(db: LifeDatabase) -> AgentWorkflow:
+            result = await workflow.process_text(
+                "Energy 7, stress 4 and provide me with morning brief",
+                source="telegram",
+                entry_date=date(2026, 4, 27),
+            )
+
+            self.assertEqual(result.status, "completed_actions")
+            self.assertEqual(len(result.action_results), 2)
+            self.assertIsNotNone(result.briefing)
+            self.assertIn("Logged Apr 27 as #1.", result.confirmation or "")
+            self.assertIn("Morning brief", result.confirmation or "")
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
+
+    async def test_duplicate_structured_rows_are_called_out_in_confirmation(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            first = MessageIn(
+                text="Dinner was chicken and fries.",
+                entry_date=date(2026, 4, 25),
+                source="api",
+            )
+            db.save_message(first, extract_daily_log(first.text, first.entry_date))
+            workflow = _workflow(db)
+
+            result = await workflow.log_text(
+                "Dinner was chicken and fries.",
+                source="telegram",
+                entry_date=date(2026, 4, 25),
+            )
+
+            self.assertEqual(result.status, "logged")
+            self.assertEqual(result.records["nutrition"], [])
+            self.assertIn("Already logged", result.confirmation or "")
+
+
+class FakePlanner:
+    def __init__(self, actions: list[PlannedAction]):
+        self.actions = actions
+        self.contexts: list[dict[str, object]] = []
+
+    async def plan(self, text: str, *, context: dict[str, object]) -> AgentPlan:
+        self.contexts.append(context)
+        return AgentPlan(actions=self.actions)
+
+
+def _workflow(db: LifeDatabase, planner: FakePlanner | None = None) -> AgentWorkflow:
     memory = MemoryService(db)
     return AgentWorkflow(
         db=db,
@@ -87,4 +145,6 @@ def _workflow(db: LifeDatabase) -> AgentWorkflow:
         plotter=PlotService(db),
         memory_service=memory,
         briefing_service=BriefingService(db, memory_service=memory),
+        planner=planner,
+        use_configured_planner=False,
     )

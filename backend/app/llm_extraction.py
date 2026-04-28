@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import asyncio
+import inspect
 from datetime import date
 from typing import Any, Protocol
 
@@ -34,6 +35,8 @@ Rules:
 - Put open-ended reflection into journal.text with concise tags.
 - Add clarification_questions only for useful follow-up questions.
 - Dates must use ISO format YYYY-MM-DD.
+- Use already_logged_context to avoid extracting duplicate same-day facts when the user appears to be repeating information already logged.
+- If the user is clearly updating or adding missing detail, extract only the new or corrected detail.
 
 Extraction checklist:
 - Food, meals, calories, protein, macros -> nutrition.
@@ -60,7 +63,12 @@ Must include:
 
 
 class LLMClient(Protocol):
-    async def extract(self, text: str, entry_date: date) -> dict[str, Any]:
+    async def extract(
+        self,
+        text: str,
+        entry_date: date,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         ...
 
 
@@ -79,11 +87,16 @@ class OpenRouterClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    async def extract(self, text: str, entry_date: date) -> dict[str, Any]:
+    async def extract(
+        self,
+        text: str,
+        entry_date: date,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         errors: list[str] = []
         for model in (self.model, *self.fallback_models):
             try:
-                return await self._extract_with_model(model, text, entry_date)
+                return await self._extract_with_model(model, text, entry_date, context)
             except (
                 asyncio.TimeoutError,
                 httpx.HTTPError,
@@ -95,7 +108,13 @@ class OpenRouterClient:
 
         raise ValueError("; ".join(errors))
 
-    async def _extract_with_model(self, model: str, text: str, entry_date: date) -> dict[str, Any]:
+    async def _extract_with_model(
+        self,
+        model: str,
+        text: str,
+        entry_date: date,
+        context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         payload = {
             "model": model,
             "messages": [
@@ -104,6 +123,7 @@ class OpenRouterClient:
                     "role": "user",
                     "content": (
                         f"Target entry_date: {entry_date.isoformat()}\n\n"
+                        f"Already logged context:\n{json.dumps(context or {}, sort_keys=True)}\n\n"
                         f"Daily log text:\n{text}"
                     ),
                 },
@@ -152,7 +172,12 @@ class ExtractionService:
         self.llm_client = llm_client
         self.langextract_client = langextract_client
 
-    async def extract(self, text: str, entry_date: date | None = None) -> tuple[ParsedDailyLog, str, str | None]:
+    async def extract(
+        self,
+        text: str,
+        entry_date: date | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> tuple[ParsedDailyLog, str, str | None]:
         target_date = entry_date or date.today()
 
         if self.mode == "deterministic":
@@ -198,7 +223,9 @@ class ExtractionService:
             return extract_daily_log(text, target_date), "deterministic", None
 
         try:
-            parsed = ParsedDailyLog.model_validate(await client.extract(text, target_date))
+            parsed = ParsedDailyLog.model_validate(
+                await _extract_with_optional_context(client, text, target_date, context)
+            )
             if entry_date is not None:
                 parsed.entry_date = entry_date
             _reconcile_with_deterministic(parsed, text, target_date)
@@ -219,6 +246,18 @@ def _configured_langextract_client() -> LangExtractClient | None:
     if not settings.openrouter_api_key:
         return None
     return LangExtractClient(api_key=settings.openrouter_api_key)
+
+
+async def _extract_with_optional_context(
+    client: LLMClient,
+    text: str,
+    target_date: date,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    parameters = inspect.signature(client.extract).parameters
+    if "context" in parameters:
+        return await client.extract(text, target_date, context=context)
+    return await client.extract(text, target_date)
 
 
 def _has_structured_signal(parsed: ParsedDailyLog) -> bool:
