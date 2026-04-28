@@ -125,9 +125,7 @@ class AgentWorkflow:
 
     async def _execute_plan(self, state: WorkflowState, plan: AgentPlan) -> WorkflowResult:
         actions = [
-            action
-            for action in plan.actions
-            if action.intent != "ignore" or len(plan.actions) == 1
+            action for action in plan.actions if action.intent != "ignore" or len(plan.actions) == 1
         ]
         if not actions:
             actions = [PlannedAction(intent="ignore", text=state["text"])]
