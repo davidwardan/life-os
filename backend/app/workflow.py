@@ -259,7 +259,20 @@ class AgentWorkflow:
 
     async def _run_plot(self, state: WorkflowState) -> WorkflowState:
         text = state["text"]
-        # Use intelligent generation for more flexible results
+        requests = parse_plot_requests(text)
+        if requests and all(request.metric != "auto" for request in requests):
+            plots = tuple(self.plotter.generate(request) for request in requests)
+            captions = [f"{plot.title} ({plot.detail})" for plot in plots]
+            confirmation = captions[0] if len(captions) == 1 else f"I made {len(captions)} plots."
+            return {
+                "result": WorkflowResult(
+                    ok=True,
+                    status="plot_sent",
+                    confirmation=confirmation,
+                    plot_results=plots,
+                )
+            }
+
         plot = await self.plotter.generate_smart(text)
         return {
             "result": WorkflowResult(
@@ -380,40 +393,37 @@ def format_log_confirmation(
     method: str,
     error: str | None,
 ) -> str:
-    # Use emojis and bold text for a cleaner look
-    header = f"✅ *Logged {parsed.date:%b %d}* as `#{raw_message_id}`"
-    lines = [header]
-
+    lines = [f"Logged {parsed.date:%b %-d} as #{raw_message_id}."]
     if parsed.wellbeing:
-        bits = []
+        wellbeing = []
         if parsed.wellbeing.sleep_hours is not None:
-            bits.append(f"💤 {parsed.wellbeing.sleep_hours:g}h")
+            wellbeing.append(f"sleep {parsed.wellbeing.sleep_hours:g}h")
         if parsed.wellbeing.energy is not None:
-            bits.append(f"⚡️ {parsed.wellbeing.energy}/10")
+            wellbeing.append(f"energy {parsed.wellbeing.energy}/10")
         if parsed.wellbeing.stress is not None:
-            bits.append(f"🧗 {parsed.wellbeing.stress}/10")
+            wellbeing.append(f"stress {parsed.wellbeing.stress}/10")
         if parsed.wellbeing.mood is not None:
-            bits.append(f"🎭 {parsed.wellbeing.mood}/10")
-        if bits:
-            lines.append(" ".join(bits))
+            wellbeing.append(f"mood {parsed.wellbeing.mood}/10")
+        if wellbeing:
+            lines.append("Wellbeing: " + ", ".join(wellbeing))
         if parsed.wellbeing.notes:
-            lines.append(f"📝 _{escape_markdown(parsed.wellbeing.notes)}_")
+            lines.append(f"Note: {parsed.wellbeing.notes}")
 
     if parsed.nutrition:
-        lines.append("\n*Nutrition*")
+        lines.append("Nutrition:")
         for item in parsed.nutrition[:4]:
-            meal = f"_{escape_markdown(item.meal_type)}_: " if item.meal_type else ""
+            meal = f"{item.meal_type}: " if item.meal_type else ""
             macro_bits = []
             if item.calories is not None:
                 macro_bits.append(f"{item.calories:g} cal")
             if item.protein_g is not None:
                 marker = "~" if item.estimated else ""
                 macro_bits.append(f"{marker}{item.protein_g:g}g protein")
-            suffix = f" \\({', '.join(macro_bits)}\\)" if macro_bits else ""
-            lines.append(f"• {meal}{escape_markdown(item.description)}{suffix}")
+            suffix = f" ({', '.join(macro_bits)})" if macro_bits else ""
+            lines.append(f"- {meal}{item.description}{suffix}")
 
     if parsed.workout:
-        workout = escape_markdown(parsed.workout.workout_type or "workout")
+        workout = parsed.workout.workout_type or "workout"
         details = []
         if parsed.workout.distance_km is not None:
             details.append(f"{parsed.workout.distance_km:g} km")
@@ -421,36 +431,34 @@ def format_log_confirmation(
             details.append(f"pace {parsed.workout.pace:g}")
         if parsed.workout.duration_min is not None:
             details.append(f"{parsed.workout.duration_min:g} min")
-        suffix = f" \\({', '.join(details)}\\)" if details else ""
-        lines.append(f"\n🏃 *{workout}*{suffix}")
+        suffix = f" ({', '.join(details)})" if details else ""
+        lines.append(f"Workout: {workout}{suffix}")
         for exercise in parsed.workout.exercises[:5]:
             if exercise.sets and exercise.reps:
-                load = f" at {escape_markdown(exercise.load)}" if exercise.load else ""
-                lines.append(f"  ◦ {escape_markdown(exercise.name)}: {exercise.sets}x{exercise.reps}{load}")
+                load = f" at {exercise.load}" if exercise.load else ""
+                lines.append(f"- {exercise.name}: {exercise.sets}x{exercise.reps}{load}")
             elif exercise.duration_min:
-                lines.append(f"  ◦ {escape_markdown(exercise.name)}: {exercise.duration_min:g} min")
+                lines.append(f"- {exercise.name}: {exercise.duration_min:g} min")
 
     if parsed.career:
-        lines.append("\n*Career*")
+        lines.append("Career:")
         for item in parsed.career[:3]:
             duration = f"{item.duration_hours:g}h " if item.duration_hours is not None else ""
-            project = escape_markdown(item.project or "work")
-            progress = f" — {escape_markdown(item.progress_note)}" if item.progress_note else ""
-            lines.append(f"• {duration}on *{project}*{progress}")
+            project = item.project or "work"
+            progress = f" - {item.progress_note}" if item.progress_note else ""
+            lines.append(f"- {duration}on {project}{progress}")
 
     if parsed.journal:
-        tag_text = f" `[{', '.join(map(escape_markdown, parsed.journal.tags))}]`" if parsed.journal.tags else ""
-        lines.append(f"\n📖 *Journal*: saved{tag_text}")
+        tag_text = f" [{', '.join(parsed.journal.tags)}]" if parsed.journal.tags else ""
+        lines.append(f"Journal: saved{tag_text}")
 
     if parsed.clarification_questions:
-        label = "❓ *Question*" if len(parsed.clarification_questions) == 1 else "❓ *Questions*"
-        lines.append("\n" + label)
+        label = "Question" if len(parsed.clarification_questions) == 1 else "Questions"
+        lines.append(label + ":")
         for question in parsed.clarification_questions[:2]:
-            lines.append(f"• {escape_markdown(question)}")
-
+            lines.append(f"- {question}")
     if error:
-        lines.append(f"\n⚠️ _Extraction note: {escape_markdown(method)} fallback handled this because {escape_markdown(error)}_")
-
+        lines.append(f"Extraction note: {method} fallback handled this because {error}")
     return "\n".join(lines)
 
 
@@ -522,7 +530,7 @@ def _truncate_journal(text: str, limit: int = 60) -> str:
 
 def format_memory_confirmation(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "🧠 I didn't find any durable preferences or strategies to remember. Try phrasing it as: _\"Remember that briefings should be direct and concise.\"_"
+        return '🧠 I didn\'t find any durable preferences or strategies to remember. Try phrasing it as: _"Remember that briefings should be direct and concise."_'
     lines = [f"🧠 *I will remember {len(items)} item(s)*:"]
     for item in items[:4]:
         lines.append(f"• _{escape_markdown(item['category'])}_: {escape_markdown(item['value'])}")
@@ -534,7 +542,6 @@ def format_learned_memory_note(items: list[dict[str, Any]]) -> str:
         item = items[0]
         return f"✨ *Also remembered*: {escape_markdown(item['value'])}."
     return f"✨ *Also remembered {len(items)} durable preferences or strategies*."
-
 
 
 def _logs_for_date(

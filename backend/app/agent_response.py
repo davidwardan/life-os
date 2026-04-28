@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from backend.app.schemas import AgentMessageIn, AgentReply
 from backend.app.workflow import AgentWorkflow, Intent, WorkflowResult
 
@@ -50,9 +52,6 @@ def build_agent_reply(message: AgentMessageIn, result: WorkflowResult) -> AgentR
         learned_memory_count=result.learned_memory_count,
         plot_count=len(result.plot_results),
     )
-
-
-import re
 
 
 def apply_tone(text: str | None, tone: str) -> str | None:

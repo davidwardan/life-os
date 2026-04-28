@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from backend.app.config import DATA_DIR
+import httpx
+from pydantic import BaseModel, Field
+
+from backend.app._db_schema import SCHEMA
+from backend.app.config import DATA_DIR, settings
 
 os.environ.setdefault("MPLCONFIGDIR", str(DATA_DIR / "matplotlib"))
 os.environ.setdefault("XDG_CACHE_HOME", str(DATA_DIR / "cache"))
@@ -31,9 +36,6 @@ GRID = "#d8d8d2"
 RED = "#d9291c"
 
 
-from pydantic import BaseModel, Field
-
-
 @dataclass(frozen=True)
 class PlotRequest:
     metric: str
@@ -43,13 +45,17 @@ class PlotRequest:
 
 
 class PlotConfiguration(BaseModel):
-    query: str = Field(description="SQLite query to fetch data. Always include a 'date' or 'label' column.")
+    query: str = Field(
+        description="SQLite query to fetch data. Always include a 'date' or 'label' column."
+    )
     chart_type: Literal["line", "bar", "heatmap"] = Field(default="line")
     title: str
     ylabel: str
     kicker: str = Field(default="LIFE OS")
     series: list[str] = Field(description="Columns from the query to plot on the Y axis.")
-    insight_prompt: str = Field(description="A prompt to generate a 1-sentence insight from the fetched data.")
+    insight_prompt: str = Field(
+        description="A prompt to generate a 1-sentence insight from the fetched data."
+    )
 
 
 PLOTTING_SYSTEM_PROMPT = f"""
@@ -110,7 +116,13 @@ class PlottingAgent:
         payload = {
             "model": settings.openrouter_model,
             "messages": [
-                {"role": "system", "content": "You are a concise data analyst. Write a 1-sentence insight about the provided data."},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a concise data analyst. Write a 1-sentence insight about the "
+                        "provided data."
+                    ),
+                },
                 {"role": "user", "content": f"Prompt: {prompt}\nData: {json.dumps(data[:30])}"},
             ],
             "temperature": 0.3,
@@ -206,7 +218,9 @@ def parse_plot_request(text: str) -> PlotRequest | None:
     if any(word in lower for word in ("habit", "habits", "heatmap", "completeness", "complete")):
         return PlotRequest(metric="data_completeness", days=days, original_text=text)
     if subject or "exercise" in lower:
-        return PlotRequest(metric="exercise_history", days=days, subject=subject, original_text=text)
+        return PlotRequest(
+            metric="exercise_history", days=days, subject=subject, original_text=text
+        )
     if any(word in lower for word in ("frequency", "count")) and any(
         word in lower for word in ("workout", "workouts", "training")
     ):
@@ -255,7 +269,9 @@ class PlotService:
         self.db = db
         self.plots_dir = plots_dir
         self.plots_dir.mkdir(parents=True, exist_ok=True)
-        self.agent = PlottingAgent(settings.openrouter_api_key) if settings.openrouter_api_key else None
+        self.agent = (
+            PlottingAgent(settings.openrouter_api_key) if settings.openrouter_api_key else None
+        )
 
     async def generate_smart(self, text: str) -> PlotResult:
         if not self.agent:
@@ -266,11 +282,11 @@ class PlotService:
         try:
             config = await self.agent.plan(text)
             rows = self._rows(config.query, ())
-        except Exception as e:
+        except Exception:
             # Fallback on planner error
             req = parse_plot_request(text)
             return self.generate(req) if req else self._energy_stress(30)
-        
+
         if not rows:
             # Generate empty plot with legacy style
             path = self._path("empty")
@@ -281,28 +297,41 @@ class PlotService:
 
         path = self._path(_slug(config.title))
         fig, ax = _figure()
-        
+
         # Determine X values (date or label)
         x_key = "date" if "date" in rows[0] else ("label" if "label" in rows[0] else None)
         if not x_key:
             # Guess first column if no date/label
             x_key = list(rows[0].keys())[0]
-            
+
         x_labels = [str(row[x_key]) for row in rows]
         x_values = list(range(len(rows)))
 
         if config.chart_type == "line":
             colors = [INK, RED, MUTED, "#444", "#888"]
             for i, series_key in enumerate(config.series):
-                if series_key not in rows[0]: continue
+                if series_key not in rows[0]:
+                    continue
                 values = [row[series_key] for row in rows]
                 color = colors[i % len(colors)]
-                ax.plot(x_values, values, marker="o", markersize=6, linewidth=2.4, color=color, label=series_key.replace("_", " "))
+                ax.plot(
+                    x_values,
+                    values,
+                    marker="o",
+                    markersize=6,
+                    linewidth=2.4,
+                    color=color,
+                    label=series_key.replace("_", " "),
+                )
                 _annotate_last(ax, x_values, values, series_key.replace("_", " "), color)
             if len(config.series) > 1:
                 ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
         elif config.chart_type == "bar":
-            series_key = config.series[0] if config.series and config.series[0] in rows[0] else list(rows[0].keys())[1]
+            series_key = (
+                config.series[0]
+                if config.series and config.series[0] in rows[0]
+                else list(rows[0].keys())[1]
+            )
             values = [row[series_key] for row in rows]
             bars = ax.bar(x_values, values, color=INK, width=0.6)
             if bars:
@@ -318,7 +347,7 @@ class PlotService:
 
         _style_axis(ax, config.title, config.ylabel, rows, kicker=config.kicker)
         _set_date_ticks(ax, x_values, x_labels)
-        
+
         # Generate insight
         try:
             insight = await self.agent.generate_insight(config.insight_prompt, rows)
