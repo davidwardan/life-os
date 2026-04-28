@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 Source = Literal["web", "telegram", "whatsapp", "openclaw", "api"]
-InteractionMode = Literal["auto", "log", "briefing", "plot", "memory"]
+InteractionMode = Literal["auto", "log", "briefing", "plot", "memory", "chat"]
 InteractionTone = Literal["balanced", "terse", "explanatory"]
 
 

@@ -159,6 +159,7 @@ class AgentWorkflow:
         builder.add_node("briefing", self._run_briefing)
         builder.add_node("plot", self._run_plot)
         builder.add_node("log", self._run_log)
+        builder.add_node("chat", self._run_chat)
         builder.add_edge(START, "classify")
         builder.add_conditional_edges(
             "classify",
@@ -170,9 +171,10 @@ class AgentWorkflow:
                 "briefing": "briefing",
                 "plot": "plot",
                 "log": "log",
+                "chat": "chat",
             },
         )
-        for node in ("ignore", "memory", "delete", "briefing", "plot", "log"):
+        for node in ("ignore", "memory", "delete", "briefing", "plot", "log", "chat"):
             builder.add_edge(node, END)
         return builder.compile()
 
