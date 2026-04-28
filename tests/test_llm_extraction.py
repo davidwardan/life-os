@@ -62,6 +62,20 @@ class FakeLLMClient:
         }
 
 
+class ContextAwareLLMClient(FakeLLMClient):
+    def __init__(self) -> None:
+        self.contexts: list[dict[str, object] | None] = []
+
+    async def extract(
+        self,
+        text: str,
+        entry_date: date,
+        context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        self.contexts.append(context)
+        return await super().extract(text, entry_date)
+
+
 class BrokenLLMClient:
     async def extract(self, text: str, entry_date: date) -> dict[str, object]:
         return {"not": "valid"}
@@ -152,7 +166,13 @@ class FallbackOpenRouterClient(OpenRouterClient):
         )
         self.models: list[str] = []
 
-    async def _extract_with_model(self, model: str, text: str, entry_date: date) -> dict[str, object]:
+    async def _extract_with_model(
+        self,
+        model: str,
+        text: str,
+        entry_date: date,
+        context: dict[str, object] | None = None,
+    ) -> dict[str, object]:
         self.models.append(model)
         if model == "primary-model":
             raise TimeoutError("primary timed out")
@@ -244,6 +264,22 @@ class LLMExtractionTests(IsolatedAsyncioTestCase):
         self.assertEqual(parsed.workout.workout_type, "legs")
         self.assertEqual(parsed.workout.exercises[0].name, "squat")
         self.assertEqual(parsed.career[0].project, "thesis")
+
+    async def test_passes_existing_log_context_to_context_aware_llm_client(self) -> None:
+        client = ContextAwareLLMClient()
+        service = ExtractionService(mode="llm", llm_client=client)
+        context = {"same_day_logs": {"nutrition": [{"description": "chicken and fries"}]}}
+
+        parsed, method, error = await service.extract(
+            "Dinner was chicken and fries.",
+            date(2026, 4, 25),
+            context=context,
+        )
+
+        self.assertEqual(method, "llm")
+        self.assertIsNone(error)
+        self.assertEqual(client.contexts, [context])
+        self.assertEqual(parsed.nutrition[0].description, "oatmeal with dates")
 
     async def test_falls_back_when_llm_output_is_invalid(self) -> None:
         service = ExtractionService(mode="llm", llm_client=BrokenLLMClient())
