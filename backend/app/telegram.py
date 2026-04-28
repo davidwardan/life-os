@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 import sqlite3
 from typing import Any, Protocol
 from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService
 from backend.app.plotting import PlotService
-from backend.app.workflow import AgentWorkflow, escape_markdown
+from backend.app.workflow import AgentWorkflow
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,6 @@ class TelegramBotClient:
                 json={
                     "chat_id": chat_id,
                     "text": text,
-                    "parse_mode": "MarkdownV2",
                     "disable_web_page_preview": True,
                 },
             )
@@ -51,7 +51,6 @@ class TelegramBotClient:
                     data={
                         "chat_id": chat_id,
                         "caption": caption,
-                        "parse_mode": "MarkdownV2",
                     },
                     files={"photo": photo},
                 )
@@ -148,10 +147,10 @@ class TelegramService:
                 await self.client.send_photo(
                     chat_id,
                     str(plot.path),
-                    escape_markdown(caption),
+                    _telegram_plain_text(caption),
                 )
             if result.confirmation and (not result.plot_results or len(result.plot_results) > 1):
-                await self.client.send_message(chat_id, result.confirmation)
+                await self.client.send_message(chat_id, _telegram_plain_text(result.confirmation))
 
         return TelegramResult(
             ok=result.ok,
@@ -221,6 +220,15 @@ def _telegram_entry_date(timestamp: Any):
     if not isinstance(timestamp, int):
         return None
     return datetime.fromtimestamp(timestamp, ZoneInfo(settings.timezone)).date()
+
+
+def _telegram_plain_text(text: str) -> str:
+    for char in r"_*[]()~`>#+-=|{}.!":
+        text = text.replace(f"\\{char}", char)
+    text = re.sub(r"\*([^*\n]+)\*", r"\1", text)
+    text = re.sub(r"_([^_\n]+)_", r"\1", text)
+    text = re.sub(r"`([^`\n]+)`", r"\1", text)
+    return text
 
 
 def _now() -> str:
