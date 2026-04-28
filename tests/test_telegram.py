@@ -2,12 +2,13 @@ from datetime import date
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase
+from unittest.mock import patch
 
 from backend.app.db import LifeDatabase
 from backend.app.extraction import extract_daily_log
 from backend.app.llm_extraction import ExtractionService
 from backend.app.schemas import MessageIn
-from backend.app.telegram import TelegramService
+from backend.app.telegram import TelegramBotClient, TelegramService
 
 
 class FakeTelegramClient:
@@ -22,7 +23,39 @@ class FakeTelegramClient:
         self.photos.append((chat_id, photo_path, caption))
 
 
+class FakeHttpResponse:
+    def raise_for_status(self) -> None:
+        return None
+
+
+class FakeHttpClient:
+    sent_json: dict[str, object] | None = None
+
+    def __init__(self, timeout: int) -> None:
+        self.timeout = timeout
+
+    async def __aenter__(self) -> "FakeHttpClient":
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def post(self, _url: str, json: dict[str, object]) -> FakeHttpResponse:
+        self.__class__.sent_json = json
+        return FakeHttpResponse()
+
+
 class TelegramTests(IsolatedAsyncioTestCase):
+    async def test_bot_client_sends_plain_text_messages(self) -> None:
+        FakeHttpClient.sent_json = None
+
+        with patch("backend.app.telegram.httpx.AsyncClient", FakeHttpClient):
+            await TelegramBotClient("token").send_message(456, "Logged Apr 25 as #1.")
+
+        self.assertIsNotNone(FakeHttpClient.sent_json)
+        self.assertEqual(FakeHttpClient.sent_json["text"], "Logged Apr 25 as #1.")
+        self.assertNotIn("parse_mode", FakeHttpClient.sent_json)
+
     async def test_logs_allowed_text_message_and_sends_confirmation(self) -> None:
         with TemporaryDirectory() as directory:
             db = LifeDatabase(Path(directory) / "life.sqlite3")
@@ -54,6 +87,7 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertEqual(client.sent[0][0], 456)
             self.assertIn("Logged Apr", client.sent[0][1])
             self.assertIn("as #1", client.sent[0][1])
+            self.assertNotIn("\\#", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
     async def test_confirmation_includes_bounded_followup_for_vague_log(self) -> None:
@@ -335,6 +369,8 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertTrue(result.ok)
             self.assertEqual(result.status, "memory_updated")
             self.assertIn("I will remember", client.sent[0][1])
+            self.assertNotIn("*I will remember", client.sent[0][1])
+            self.assertNotIn("\\", client.sent[0][1])
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
     async def test_delete_request_lists_recent_logs_without_logging_message(self) -> None:
