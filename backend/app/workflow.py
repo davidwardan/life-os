@@ -258,16 +258,15 @@ class AgentWorkflow:
         }
 
     async def _run_plot(self, state: WorkflowState) -> WorkflowState:
-        requests = parse_plot_requests(state["text"])
-        plots = tuple(self.plotter.generate(request) for request in requests)
-        captions = [f"{plot.title} ({plot.detail})" for plot in plots]
-        confirmation = captions[0] if len(captions) == 1 else f"I made {len(captions)} plots."
+        text = state["text"]
+        # Use intelligent generation for more flexible results
+        plot = await self.plotter.generate_smart(text)
         return {
             "result": WorkflowResult(
                 ok=True,
                 status="plot_sent",
-                confirmation=confirmation,
-                plot_results=plots,
+                confirmation=plot.detail,
+                plot_results=(plot,),
             )
         }
 

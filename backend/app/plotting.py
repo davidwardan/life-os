@@ -31,11 +31,101 @@ GRID = "#d8d8d2"
 RED = "#d9291c"
 
 
+from pydantic import BaseModel, Field
+
+
 @dataclass(frozen=True)
 class PlotRequest:
     metric: str
     days: int = 30
     subject: str | None = None
+    original_text: str | None = None
+
+
+class PlotConfiguration(BaseModel):
+    query: str = Field(description="SQLite query to fetch data. Always include a 'date' or 'label' column.")
+    chart_type: Literal["line", "bar", "heatmap"] = Field(default="line")
+    title: str
+    ylabel: str
+    kicker: str = Field(default="LIFE OS")
+    series: list[str] = Field(description="Columns from the query to plot on the Y axis.")
+    insight_prompt: str = Field(description="A prompt to generate a 1-sentence insight from the fetched data.")
+
+
+PLOTTING_SYSTEM_PROMPT = f"""
+You are the data scientist for Life OS. Your goal is to translate natural language requests into SQLite queries and visualization settings.
+
+Schema Context:
+{SCHEMA}
+
+Rules:
+1. Always generate valid SQLite code.
+2. Group by date when appropriate to show trends.
+3. For line charts, ensure multiple series have the same X axis (date).
+4. Use 'label' as a column name if the X axis isn't a date (e.g. project names).
+5. Limit the scope to the last N days as requested by the user.
+6. Return JSON matching the PlotConfiguration schema.
+
+Example:
+User: "plot my sleep vs energy for the last 2 weeks"
+Result: {{
+    "query": "SELECT date, sleep_hours, energy FROM daily_checkins WHERE date >= date('now', '-14 days') ORDER BY date",
+    "chart_type": "line",
+    "title": "Sleep vs Energy",
+    "ylabel": "Hours / Score",
+    "series": ["sleep_hours", "energy"],
+    "insight_prompt": "Compare how sleep hours relate to energy levels in this period."
+}}
+""".strip()
+
+
+class PlottingAgent:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    async def plan(self, text: str) -> PlotConfiguration:
+        payload = {
+            "model": settings.openrouter_model,
+            "messages": [
+                {"role": "system", "content": PLOTTING_SYSTEM_PROMPT},
+                {"role": "user", "content": text},
+            ],
+            "response_format": {"type": "json_object"},
+            "temperature": 0,
+        }
+        async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
+            response = await client.post(
+                f"{settings.openrouter_base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            data = response.json()["choices"][0]["message"]["content"]
+            return PlotConfiguration.model_validate_json(data)
+
+    async def generate_insight(self, prompt: str, data: list[dict[str, Any]]) -> str:
+        payload = {
+            "model": settings.openrouter_model,
+            "messages": [
+                {"role": "system", "content": "You are a concise data analyst. Write a 1-sentence insight about the provided data."},
+                {"role": "user", "content": f"Prompt: {prompt}\nData: {json.dumps(data[:30])}"},
+            ],
+            "temperature": 0.3,
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                f"{settings.openrouter_base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"].strip()
 
 
 @dataclass(frozen=True)
@@ -106,26 +196,29 @@ def parse_plot_request(text: str) -> PlotRequest | None:
     days = _parse_days(lower)
     subject = _parse_exercise_subject(lower)
 
+    # Always prefer original text for the agent if possible
+    request = PlotRequest(metric="auto", days=days, subject=subject, original_text=text)
+
     if ("sleep" in lower and "energy" in lower) or "sleep" in lower:
-        return PlotRequest(metric="sleep_energy", days=days)
+        return PlotRequest(metric="sleep_energy", days=days, original_text=text)
     if "stress" in lower and any(word in lower for word in ("workout", "training", "load")):
-        return PlotRequest(metric="stress_workout", days=days)
+        return PlotRequest(metric="stress_workout", days=days, original_text=text)
     if any(word in lower for word in ("habit", "habits", "heatmap", "completeness", "complete")):
-        return PlotRequest(metric="data_completeness", days=days)
+        return PlotRequest(metric="data_completeness", days=days, original_text=text)
     if subject or "exercise" in lower:
-        return PlotRequest(metric="exercise_history", days=days, subject=subject)
+        return PlotRequest(metric="exercise_history", days=days, subject=subject, original_text=text)
     if any(word in lower for word in ("frequency", "count")) and any(
         word in lower for word in ("workout", "workouts", "training")
     ):
-        return PlotRequest(metric="workout_frequency", days=days)
+        return PlotRequest(metric="workout_frequency", days=days, original_text=text)
     if any(word in lower for word in ("project", "projects")) and any(
         word in lower for word in ("career", "work", "deep work", "hours")
     ):
-        return PlotRequest(metric="career_projects", days=days)
+        return PlotRequest(metric="career_projects", days=days, original_text=text)
     if "protein" in lower and any(
         word in lower for word in ("consistency", "consistent", "target")
     ):
-        return PlotRequest(metric="protein_consistency", days=days)
+        return PlotRequest(metric="protein_consistency", days=days, original_text=text)
 
     for keyword, metric in (
         ("wellbeing", "wellbeing"),
@@ -140,9 +233,9 @@ def parse_plot_request(text: str) -> PlotRequest | None:
         ("calories", "calories"),
     ):
         if keyword in lower:
-            return PlotRequest(metric=metric, days=days)
+            return PlotRequest(metric=metric, days=days, original_text=text)
 
-    return PlotRequest(metric="energy", days=days)
+    return request
 
 
 def parse_plot_requests(text: str) -> list[PlotRequest]:
@@ -162,6 +255,78 @@ class PlotService:
         self.db = db
         self.plots_dir = plots_dir
         self.plots_dir.mkdir(parents=True, exist_ok=True)
+        self.agent = PlottingAgent(settings.openrouter_api_key) if settings.openrouter_api_key else None
+
+    async def generate_smart(self, text: str) -> PlotResult:
+        if not self.agent:
+            # Fallback to legacy parser if no agent
+            req = parse_plot_request(text)
+            return self.generate(req) if req else self._energy_stress(30)
+
+        try:
+            config = await self.agent.plan(text)
+            rows = self._rows(config.query, ())
+        except Exception as e:
+            # Fallback on planner error
+            req = parse_plot_request(text)
+            return self.generate(req) if req else self._energy_stress(30)
+        
+        if not rows:
+            # Generate empty plot with legacy style
+            path = self._path("empty")
+            fig, ax = _figure()
+            _style_axis(ax, config.title, config.ylabel, [], kicker=config.kicker)
+            _save(fig, path)
+            return PlotResult(path=path, title=config.title, detail="No data found")
+
+        path = self._path(_slug(config.title))
+        fig, ax = _figure()
+        
+        # Determine X values (date or label)
+        x_key = "date" if "date" in rows[0] else ("label" if "label" in rows[0] else None)
+        if not x_key:
+            # Guess first column if no date/label
+            x_key = list(rows[0].keys())[0]
+            
+        x_labels = [str(row[x_key]) for row in rows]
+        x_values = list(range(len(rows)))
+
+        if config.chart_type == "line":
+            colors = [INK, RED, MUTED, "#444", "#888"]
+            for i, series_key in enumerate(config.series):
+                if series_key not in rows[0]: continue
+                values = [row[series_key] for row in rows]
+                color = colors[i % len(colors)]
+                ax.plot(x_values, values, marker="o", markersize=6, linewidth=2.4, color=color, label=series_key.replace("_", " "))
+                _annotate_last(ax, x_values, values, series_key.replace("_", " "), color)
+            if len(config.series) > 1:
+                ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+        elif config.chart_type == "bar":
+            series_key = config.series[0] if config.series and config.series[0] in rows[0] else list(rows[0].keys())[1]
+            values = [row[series_key] for row in rows]
+            bars = ax.bar(x_values, values, color=INK, width=0.6)
+            if bars:
+                bars[-1].set_color(RED)
+                _annotate_last(ax, x_values, values, "latest", RED)
+        elif config.chart_type == "heatmap":
+            categories = [c for c in rows[0].keys() if c != x_key]
+            matrix = [[int(row[cat]) for row in rows] for cat in categories]
+            ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
+            ax.set_yticks(list(range(len(categories))))
+            ax.set_yticklabels([c.title() for c in categories])
+            ax.grid(False)
+
+        _style_axis(ax, config.title, config.ylabel, rows, kicker=config.kicker)
+        _set_date_ticks(ax, x_values, x_labels)
+        
+        # Generate insight
+        try:
+            insight = await self.agent.generate_insight(config.insight_prompt, rows)
+        except Exception:
+            insight = f"{len(rows)} data points analyzed"
+
+        _save(fig, path)
+        return PlotResult(path=path, title=config.title, detail=insight)
 
     def generate(self, request: PlotRequest) -> PlotResult:
         metric = SUPPORTED_METRICS.get(request.metric, "Energy and stress")
