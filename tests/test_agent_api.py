@@ -102,3 +102,13 @@ class AgentApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "briefing_handled")
         self.assertEqual(self.fake_workflow.forced_intents, ["briefing"])
+
+    def test_agent_chat_mode_is_accepted(self) -> None:
+        response = self.client.post(
+            "/api/agent",
+            json={"text": "hi", "source": "web", "mode": "chat"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "chat_handled")
+        self.assertEqual(self.fake_workflow.forced_intents, ["chat"])

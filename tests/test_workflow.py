@@ -79,6 +79,21 @@ class WorkflowTests(IsolatedAsyncioTestCase):
             self.assertIsNotNone(result.briefing)
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
 
+    async def test_greeting_routes_to_chat_without_logging(self) -> None:
+        with TemporaryDirectory() as directory:
+            db = LifeDatabase(Path(directory) / "life.sqlite3")
+            workflow = _workflow(db, extractor=FakeChatExtractor())
+
+            result = await workflow.process_text(
+                "hi",
+                source="web",
+                entry_date=date(2026, 4, 27),
+            )
+
+            self.assertEqual(result.status, "completed_actions")
+            self.assertEqual(result.confirmation, "Hi. Ready when you are.")
+            self.assertEqual(len(db.recent_logs()["raw_messages"]), 0)
+
     async def test_llm_plan_can_log_and_send_briefing_from_one_message(self) -> None:
         with TemporaryDirectory() as directory:
             db = LifeDatabase(Path(directory) / "life.sqlite3")
@@ -137,11 +152,28 @@ class FakePlanner:
         return AgentPlan(actions=self.actions)
 
 
-def _workflow(db: LifeDatabase, planner: FakePlanner | None = None) -> AgentWorkflow:
+class FakeChatExtractor:
+    async def chat(self, text: str, context: dict[str, object] | None = None) -> str:
+        return "Hi. Ready when you are."
+
+    async def extract(
+        self,
+        text: str,
+        entry_date: date | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        return await ExtractionService(mode="deterministic").extract(text, entry_date, context)
+
+
+def _workflow(
+    db: LifeDatabase,
+    planner: FakePlanner | None = None,
+    extractor: ExtractionService | FakeChatExtractor | None = None,
+) -> AgentWorkflow:
     memory = MemoryService(db)
     return AgentWorkflow(
         db=db,
-        extractor=ExtractionService(mode="deterministic"),
+        extractor=extractor or ExtractionService(mode="deterministic"),
         plotter=PlotService(db),
         memory_service=memory,
         briefing_service=BriefingService(db, memory_service=memory),
