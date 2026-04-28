@@ -23,7 +23,7 @@ from backend.app.schemas import MessageIn, ParsedDailyLog
 logger = logging.getLogger(__name__)
 
 
-Intent = Literal["ignore", "memory", "delete", "briefing", "plot", "log"]
+Intent = Literal["ignore", "memory", "delete", "briefing", "plot", "log", "chat"]
 
 
 class WorkflowState(TypedDict, total=False):
@@ -188,10 +188,15 @@ class AgentWorkflow:
             return await self._run_briefing(state)
         if intent == "plot":
             return await self._run_plot(state)
+        if intent == "chat":
+            return await self._run_chat(state)
         return await self._run_log(state)
 
     async def _classify(self, state: WorkflowState) -> WorkflowState:
         text = state["text"]
+        lower = text.lower().strip()
+        if lower in {"hey", "hi", "hello", "how are you", "how are you?", "yo"}:
+            return {"intent": "chat"}
         if contains_non_logging_reply(text) and is_briefing_request(text):
             return {"intent": "briefing"}
         if is_non_logging_reply(text):
@@ -253,16 +258,38 @@ class AgentWorkflow:
         }
 
     async def _run_plot(self, state: WorkflowState) -> WorkflowState:
-        requests = parse_plot_requests(state["text"])
-        plots = tuple(self.plotter.generate(request) for request in requests)
-        captions = [f"{plot.title} ({plot.detail})" for plot in plots]
-        confirmation = captions[0] if len(captions) == 1 else f"I made {len(captions)} plots."
+        text = state["text"]
+        requests = parse_plot_requests(text)
+        if requests and all(request.metric != "auto" for request in requests):
+            plots = tuple(self.plotter.generate(request) for request in requests)
+            captions = [f"{plot.title} ({plot.detail})" for plot in plots]
+            confirmation = captions[0] if len(captions) == 1 else f"I made {len(captions)} plots."
+            return {
+                "result": WorkflowResult(
+                    ok=True,
+                    status="plot_sent",
+                    confirmation=confirmation,
+                    plot_results=plots,
+                )
+            }
+
+        plot = await self.plotter.generate_smart(text)
         return {
             "result": WorkflowResult(
                 ok=True,
                 status="plot_sent",
-                confirmation=confirmation,
-                plot_results=plots,
+                confirmation=plot.detail,
+                plot_results=(plot,),
+            )
+        }
+
+    async def _run_chat(self, state: WorkflowState) -> WorkflowState:
+        response = await self.extractor.chat(state["text"], context=self._planning_context(None))
+        return {
+            "result": WorkflowResult(
+                ok=True,
+                status="completed_actions",
+                confirmation=response,
             )
         }
 
@@ -350,6 +377,14 @@ def _combine_action_results(results: tuple[WorkflowResult, ...], plan: AgentPlan
         learned_memory_count=sum(result.learned_memory_count for result in results),
         action_results=results,
     )
+
+
+def escape_markdown(text: str) -> str:
+    """Escapes characters reserved by Telegram's MarkdownV2."""
+    reserved = r"_*[]()~`>#+-=|{}.!"
+    for char in reserved:
+        text = text.replace(char, f"\\{char}")
+    return text
 
 
 def format_log_confirmation(
@@ -455,13 +490,13 @@ def format_duplicate_note(
             if (item.project, item.progress_note) in kept_projects:
                 continue
             project = item.project or "career"
-            note = f" - {item.progress_note}" if item.progress_note else ""
+            note = f" — {item.progress_note}" if item.progress_note else ""
             skipped.append(f"{project}{note}")
     if parsed.journal and not records.get("journal"):
         skipped.append(_truncate_journal(parsed.journal.text))
     if not skipped:
         return None
-    return "Already logged (skipped): " + "; ".join(skipped) + "."
+    return "💡 *Already logged (skipped)*: " + escape_markdown("; ".join(skipped)) + "."
 
 
 def _summarize_wellbeing_dup(item: Any) -> str:
@@ -495,18 +530,18 @@ def _truncate_journal(text: str, limit: int = 60) -> str:
 
 def format_memory_confirmation(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "I did not find a durable preference or strategy to remember. Try phrasing it as: remember that briefings should be direct and concise."
-    lines = [f"I will remember {len(items)} item(s)."]
+        return '🧠 I didn\'t find any durable preferences or strategies to remember. Try phrasing it as: _"Remember that briefings should be direct and concise."_'
+    lines = [f"🧠 *I will remember {len(items)} item(s)*:"]
     for item in items[:4]:
-        lines.append(f"- {item['category']}: {item['value']}")
+        lines.append(f"• _{escape_markdown(item['category'])}_: {escape_markdown(item['value'])}")
     return "\n".join(lines)
 
 
 def format_learned_memory_note(items: list[dict[str, Any]]) -> str:
     if len(items) == 1:
         item = items[0]
-        return f"Also remembered: {item['value']}."
-    return f"Also remembered {len(items)} durable preferences or strategies."
+        return f"✨ *Also remembered*: {escape_markdown(item['value'])}."
+    return f"✨ *Also remembered {len(items)} durable preferences or strategies*."
 
 
 def _logs_for_date(

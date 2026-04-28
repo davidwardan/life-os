@@ -16,6 +16,7 @@ const MODE_ASSUMPTIONS = {
   briefing: "Brief mode treats the text as a summary request.",
   plot: "Plot mode expects a chart request and leaves logs unchanged.",
   memory: "Memory mode looks for durable preferences and strategies.",
+  chat: "Chat mode is for conversation and won't save any logs.",
 };
 const MODE_STATUS = {
   auto: "Routing",
@@ -23,6 +24,7 @@ const MODE_STATUS = {
   briefing: "Briefing",
   plot: "Plotting",
   memory: "Remembering",
+  chat: "Chatting",
 };
 const DONE_STATUS = {
   logged: "Logged",
@@ -39,6 +41,12 @@ let activeMode = storedChoice("life-os-mode", "auto", Object.keys(MODE_ASSUMPTIO
 tone.value = storedChoice("life-os-tone", "balanced", TONE_VALUES);
 setMode(activeMode);
 
+// Auto-resize textarea
+message.addEventListener("input", () => {
+  message.style.height = "auto";
+  message.style.height = message.scrollHeight + "px";
+});
+
 submit.addEventListener("click", async () => {
   const text = message.value.trim();
   if (!text) {
@@ -46,34 +54,46 @@ submit.addEventListener("click", async () => {
     return;
   }
 
+  setLoading(true);
   setStatus(statusForMode(activeMode));
-  const response = await fetch("/api/agent", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      text,
-      entry_date: entryDate.value || null,
-      source: "web",
-      mode: activeMode,
-      tone: tone.value,
-    }),
-  });
+  parsed.innerHTML = '<div class="empty">Processing...</div>';
 
-  if (!response.ok) {
+  try {
+    const response = await fetch("/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text,
+        entry_date: entryDate.value || null,
+        source: "web",
+        mode: activeMode,
+        tone: tone.value,
+      }),
+    });
+
+    if (!response.ok) {
+      setStatus("Error");
+      parsed.textContent = await response.text();
+      return;
+    }
+
+    const payload = await response.json();
+    renderAgentReply(payload);
+    message.value = "";
+    message.style.height = "auto";
+    await loadLogs();
+    setStatus(doneStatus(payload.status));
+  } catch (err) {
     setStatus("Error");
-    parsed.textContent = await response.text();
-    return;
+    parsed.textContent = err.message;
+  } finally {
+    setLoading(false);
   }
-
-  const payload = await response.json();
-  renderAgentReply(payload);
-  message.value = "";
-  await loadLogs();
-  setStatus(doneStatus(payload.status));
 });
 
 clear.addEventListener("click", () => {
   message.value = "";
+  message.style.height = "auto";
   parsed.innerHTML = '<div class="empty">Stopped. The draft was cleared.</div>';
   setStatus("Stopped");
 });
@@ -123,6 +143,16 @@ loadExtractionStatus();
 
 function setStatus(label) {
   statusNode.textContent = label;
+  statusNode.style.borderColor = "var(--ink)";
+  setTimeout(() => {
+    statusNode.style.borderColor = "var(--line)";
+  }, 1000);
+}
+
+function setLoading(isLoading) {
+  submit.disabled = isLoading;
+  submit.textContent = isLoading ? "Sending..." : "Send";
+  submit.style.opacity = isLoading ? "0.7" : "1";
 }
 
 function setMode(mode) {

@@ -17,6 +17,16 @@ from backend.app.langextract_extraction import parsed_log_from_langextract
 from backend.app.schemas import ParsedDailyLog
 
 
+CHAT_SYSTEM_PROMPT = """
+You are a helpful and warm personal life logging assistant.
+
+The user is talking to you or greeting you without providing specific life data to log.
+Respond in a friendly, concise, and natural way.
+If the user asks who you are, explain that you help them track their daily life (nutrition, workouts, wellbeing, career).
+Keep your response to 1-2 sentences unless a longer explanation is needed.
+""".strip()
+
+
 SYSTEM_PROMPT = """
 You are an information extraction system for a local personal life logging app.
 
@@ -69,6 +79,8 @@ class LLMClient(Protocol):
         entry_date: date,
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
+
+    async def chat(self, text: str, context: dict[str, Any] | None = None) -> str: ...
 
 
 class OpenRouterClient:
@@ -159,6 +171,37 @@ class OpenRouterClient:
 
         return _decode_response_json(response.json())
 
+    async def chat(self, text: str, context: dict[str, Any] | None = None) -> str:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": CHAT_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": f"Context: {json.dumps(context or {})}\n\nUser says: {text}",
+                },
+            ],
+            "temperature": 0.7,
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            response = await asyncio.wait_for(
+                client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": "http://127.0.0.1:8000",
+                        "X-Title": "Life OS",
+                    },
+                    json=payload,
+                ),
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+
+        return response.json()["choices"][0]["message"]["content"]
+
 
 class ExtractionService:
     def __init__(
@@ -243,6 +286,15 @@ class ExtractionService:
                 "deterministic",
                 f"{prefix}LLM extraction failed: {_format_error(error)}",
             )
+
+    async def chat(self, text: str, context: dict[str, Any] | None = None) -> str:
+        client = self.llm_client or _configured_llm_client()
+        if client is None:
+            return "Hi there! I'm your life logging assistant. (Connect an API key for more natural conversation!)"
+        try:
+            return await client.chat(text, context)
+        except Exception:
+            return "Hi! I'm here and ready to help you log your day."
 
 
 def _configured_llm_client() -> OpenRouterClient | None:

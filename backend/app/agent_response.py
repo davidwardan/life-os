@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from backend.app.schemas import AgentMessageIn, AgentReply
 from backend.app.workflow import AgentWorkflow, Intent, WorkflowResult
 
@@ -10,6 +12,7 @@ MODE_INTENTS: dict[str, Intent | None] = {
     "briefing": "briefing",
     "plot": "plot",
     "memory": "memory",
+    "chat": "chat",
 }
 
 MODE_ASSUMPTIONS = {
@@ -18,6 +21,7 @@ MODE_ASSUMPTIONS = {
     "briefing": "Briefing mode treats this as a request for a summary, not a log.",
     "memory": "Memory mode looks only for durable preferences, strategies, goals, and reminders.",
     "plot": "Plot mode expects a chart request and leaves daily logs unchanged.",
+    "chat": "Chat mode is for conversation and won't save any logs.",
 }
 
 
@@ -54,5 +58,11 @@ def apply_tone(text: str | None, tone: str) -> str | None:
     if text is None:
         return None
     if tone == "terse":
-        return text.splitlines()[0]
+        # Extract the first line, but strip MarkdownV2 formatting for a clean summary
+        # unless it's a simple bold header.
+        first_line = text.splitlines()[0]
+        # Remove emojis and specific markdown for the terse version to keep it "minimal"
+        clean = re.sub(r"[✅🧠✨🏃📖❓⚠️] ", "", first_line)
+        clean = clean.replace("*", "").replace("`", "").replace("\\", "")
+        return clean
     return text
