@@ -58,7 +58,8 @@ class AgentPlanner(Protocol):
         text: str,
         *,
         context: dict[str, Any],
-    ) -> AgentPlan: ...
+    ) -> AgentPlan:
+        ...
 
 
 class OpenRouterAgentPlanner:

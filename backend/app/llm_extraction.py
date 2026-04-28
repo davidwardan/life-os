@@ -68,7 +68,8 @@ class LLMClient(Protocol):
         text: str,
         entry_date: date,
         context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]: ...
+    ) -> dict[str, Any]:
+        ...
 
 
 class OpenRouterClient:
