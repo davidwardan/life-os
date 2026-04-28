@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +26,11 @@ from backend.app.schemas import (
 from backend.app.telegram import make_telegram_service, verify_telegram_secret
 from backend.app.workflow import AgentWorkflow
 
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 app = FastAPI(title="Life OS", version="0.1.0")
 app.middleware("http")(require_web_auth)

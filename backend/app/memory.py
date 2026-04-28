@@ -53,7 +53,9 @@ class MemoryService:
             saved.append(self.upsert(candidate, source_message_id))
         return saved
 
-    def upsert(self, candidate: MemoryCandidate, source_message_id: int | None = None) -> dict[str, Any]:
+    def upsert(
+        self, candidate: MemoryCandidate, source_message_id: int | None = None
+    ) -> dict[str, Any]:
         now = _now()
         with self.db.connect() as connection:
             existing = _rows(
@@ -91,7 +93,12 @@ class MemoryService:
                         row["id"],
                     ),
                 )
-                return {**row, "times_seen": row["times_seen"] + 1, "updated_at": now, "last_seen_at": now}
+                return {
+                    **row,
+                    "times_seen": row["times_seen"] + 1,
+                    "updated_at": now,
+                    "last_seen_at": now,
+                }
 
             row_id = connection.execute(
                 """
@@ -156,9 +163,11 @@ class MemoryService:
             return rows
 
         scored = [(_memory_score(row, query), row) for row in rows]
-        return [row for score, row in sorted(scored, key=lambda item: item[0], reverse=True) if score > 0][
-            :bounded_limit
-        ]
+        return [
+            row
+            for score, row in sorted(scored, key=lambda item: item[0], reverse=True)
+            if score > 0
+        ][:bounded_limit]
 
     def briefing_context(self) -> dict[str, list[dict[str, Any]]]:
         rows = self.list_items(limit=60)
@@ -189,7 +198,9 @@ class MemoryService:
             return _rows(connection, query, params)
 
 
-def extract_memory_candidates(text: str, parsed: ParsedDailyLog | None = None) -> list[MemoryCandidate]:
+def extract_memory_candidates(
+    text: str, parsed: ParsedDailyLog | None = None
+) -> list[MemoryCandidate]:
     del parsed
     candidates: list[MemoryCandidate] = []
     for sentence in _sentences(text):
@@ -409,8 +420,7 @@ def _dedupe(candidates: list[MemoryCandidate]) -> list[MemoryCandidate]:
 def _memory_score(row: dict[str, Any], query: str) -> int:
     terms = {term for term in re.findall(r"[a-z0-9]+", query.lower()) if len(term) > 2}
     haystack = " ".join(
-        str(row.get(key) or "")
-        for key in ("category", "subject", "value", "evidence")
+        str(row.get(key) or "") for key in ("category", "subject", "value", "evidence")
     ).lower()
     return sum(1 for term in terms if term in haystack)
 

@@ -7,246 +7,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from backend.app.config import DEFAULT_DB_PATH
-from backend.app.config import settings
+from backend.app._db_dedup import (
+    duplicate_career,
+    duplicate_daily_checkin,
+    duplicate_exercise,
+    duplicate_journal,
+    duplicate_nutrition,
+    duplicate_workout,
+    enrich_from_history,
+    has_wellbeing_signal,
+)
+from backend.app._db_deletion import (
+    DELETABLE_LOG_KINDS,
+    canonical_kind,
+    delete_raw_message,
+    delete_where,
+    deletable_rows,
+    fetch_deletable_row,
+    kind_table,
+)
+from backend.app._db_schema import SCHEMA, run_migrations
+from backend.app.config import DEFAULT_DB_PATH, settings
 from backend.app.schemas import MessageIn, ParsedDailyLog
 
-
-DELETABLE_LOG_KINDS = {
-    "raw_messages",
-    "daily_checkins",
-    "nutrition",
-    "workout",
-    "workout_exercises",
-    "career",
-    "journal",
-    "memory",
-}
-
-
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS raw_messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    entry_date TEXT,
-    source TEXT NOT NULL,
-    text TEXT,
-    created_at TEXT,
-    received_at TEXT,
-    user_text TEXT,
-    processed INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS daily_checkins (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT,
-    entry_date TEXT,
-    sleep_hours REAL,
-    sleep_quality INTEGER,
-    energy INTEGER,
-    stress INTEGER,
-    mood INTEGER,
-    notes TEXT,
-    confidence REAL,
-    source_message_id INTEGER,
-    raw_message_id INTEGER,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE TABLE IF NOT EXISTS nutrition_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER,
-    source_message_id INTEGER,
-    date TEXT,
-    entry_date TEXT,
-    meal_type TEXT,
-    meal_name TEXT,
-    description TEXT,
-    calories REAL,
-    protein_g REAL,
-    carbs_g REAL,
-    fat_g REAL,
-    confidence REAL,
-    estimated INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE TABLE IF NOT EXISTS workout_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER,
-    source_message_id INTEGER,
-    date TEXT,
-    entry_date TEXT,
-    workout_type TEXT,
-    duration_min REAL,
-    distance_km REAL,
-    pace REAL,
-    intensity INTEGER,
-    notes TEXT,
-    confidence REAL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE TABLE IF NOT EXISTS workout_exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    workout_id INTEGER NOT NULL,
-    name TEXT NOT NULL,
-    sets INTEGER,
-    reps INTEGER,
-    load TEXT,
-    duration_min REAL,
-    notes TEXT,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(workout_id) REFERENCES workout_logs(id)
-);
-
-CREATE TABLE IF NOT EXISTS wellbeing_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER,
-    entry_date TEXT,
-    mood INTEGER,
-    energy INTEGER,
-    stress INTEGER,
-    sleep_hours REAL,
-    sleep_quality INTEGER,
-    confidence REAL,
-    created_at TEXT NOT NULL,
-    source_message_id INTEGER,
-    date TEXT,
-    notes TEXT
-);
-
-CREATE TABLE IF NOT EXISTS career_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER,
-    source_message_id INTEGER,
-    date TEXT,
-    entry_date TEXT,
-    project TEXT,
-    activity TEXT,
-    duration_hours REAL,
-    progress_note TEXT,
-    blockers TEXT,
-    confidence REAL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE TABLE IF NOT EXISTS journal_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    raw_message_id INTEGER,
-    source_message_id INTEGER,
-    date TEXT,
-    entry_date TEXT,
-    text TEXT NOT NULL,
-    tags_json TEXT NOT NULL DEFAULT '[]',
-    sentiment REAL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE TABLE IF NOT EXISTS memory_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    category TEXT NOT NULL,
-    subject TEXT NOT NULL,
-    value TEXT NOT NULL,
-    evidence TEXT,
-    source_message_id INTEGER,
-    confidence REAL NOT NULL DEFAULT 0.7,
-    importance INTEGER NOT NULL DEFAULT 3,
-    times_seen INTEGER NOT NULL DEFAULT 1,
-    active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    FOREIGN KEY(source_message_id) REFERENCES raw_messages(id)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_unique
-ON memory_items(category, subject, value);
-
-CREATE INDEX IF NOT EXISTS idx_memory_items_active_category
-ON memory_items(active, category);
-
-CREATE TABLE IF NOT EXISTS telegram_updates (
-    update_id INTEGER PRIMARY KEY,
-    status TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-"""
-
-
-MIGRATIONS: dict[str, dict[str, str]] = {
-    "raw_messages": {
-        "entry_date": "TEXT",
-        "text": "TEXT",
-        "created_at": "TEXT",
-        "received_at": "TEXT",
-        "user_text": "TEXT",
-        "processed": "INTEGER NOT NULL DEFAULT 0",
-    },
-    "nutrition_logs": {
-        "raw_message_id": "INTEGER",
-        "source_message_id": "INTEGER",
-        "date": "TEXT",
-        "entry_date": "TEXT",
-        "meal_type": "TEXT",
-        "meal_name": "TEXT",
-        "description": "TEXT",
-        "carbs_g": "REAL",
-        "fat_g": "REAL",
-    },
-    "workout_logs": {
-        "raw_message_id": "INTEGER",
-        "source_message_id": "INTEGER",
-        "date": "TEXT",
-        "entry_date": "TEXT",
-        "distance_km": "REAL",
-        "pace": "REAL",
-        "confidence": "REAL",
-    },
-    "wellbeing_logs": {
-        "source_message_id": "INTEGER",
-        "date": "TEXT",
-        "notes": "TEXT",
-    },
-    "career_logs": {
-        "raw_message_id": "INTEGER",
-        "source_message_id": "INTEGER",
-        "date": "TEXT",
-        "entry_date": "TEXT",
-        "confidence": "REAL",
-    },
-    "journal_entries": {
-        "raw_message_id": "INTEGER",
-        "source_message_id": "INTEGER",
-        "date": "TEXT",
-        "entry_date": "TEXT",
-    },
-    "memory_items": {
-        "category": "TEXT",
-        "subject": "TEXT",
-        "value": "TEXT",
-        "evidence": "TEXT",
-        "source_message_id": "INTEGER",
-        "confidence": "REAL NOT NULL DEFAULT 0.7",
-        "importance": "INTEGER NOT NULL DEFAULT 3",
-        "times_seen": "INTEGER NOT NULL DEFAULT 1",
-        "active": "INTEGER NOT NULL DEFAULT 1",
-        "created_at": "TEXT",
-        "updated_at": "TEXT",
-        "last_seen_at": "TEXT",
-    },
-    "telegram_updates": {
-        "update_id": "INTEGER",
-        "status": "TEXT",
-        "created_at": "TEXT",
-        "updated_at": "TEXT",
-    },
-}
+__all__ = ["DELETABLE_LOG_KINDS", "LifeDatabase"]
 
 
 class LifeDatabase:
@@ -261,6 +45,10 @@ class LifeDatabase:
         if hasattr(connection, "row_factory"):
             connection.row_factory = sqlite3.Row
         try:
+            connection.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass
+        try:
             if hasattr(connection, "sync"):
                 connection.sync()
             yield connection
@@ -273,7 +61,7 @@ class LifeDatabase:
     def initialize(self) -> None:
         with self.connect() as connection:
             connection.executescript(SCHEMA)
-            _run_migrations(connection)
+            run_migrations(connection)
 
     def save_message(self, message: MessageIn, parsed: ParsedDailyLog) -> dict[str, Any]:
         now = _now()
@@ -287,7 +75,7 @@ class LifeDatabase:
                 """,
                 (log_date, message.source, message.text, now, now, message.text),
             ).lastrowid
-            _enrich_from_history(connection, parsed, log_date)
+            enrich_from_history(connection, parsed, log_date)
 
             records: dict[str, list[dict[str, Any]]] = {
                 "daily_checkins": [],
@@ -298,9 +86,9 @@ class LifeDatabase:
                 "journal": [],
             }
 
-            if parsed.wellbeing and _has_wellbeing_signal(parsed.wellbeing):
+            if parsed.wellbeing and has_wellbeing_signal(parsed.wellbeing):
                 item = parsed.wellbeing
-                if not _duplicate_daily_checkin(connection, log_date, item):
+                if not duplicate_daily_checkin(connection, log_date, item):
                     row_id = connection.execute(
                         """
                         INSERT INTO daily_checkins
@@ -326,7 +114,7 @@ class LifeDatabase:
                     records["daily_checkins"].append({"id": row_id, **item.model_dump()})
 
             for item in parsed.nutrition:
-                if _duplicate_nutrition(connection, log_date, item):
+                if duplicate_nutrition(connection, log_date, item):
                     continue
                 row_id = connection.execute(
                     """
@@ -359,11 +147,11 @@ class LifeDatabase:
                 exercises_to_insert = [
                     exercise
                     for exercise in item.exercises
-                    if not _duplicate_exercise(connection, log_date, exercise)
+                    if not duplicate_exercise(connection, log_date, exercise)
                 ]
                 if item.exercises and not exercises_to_insert:
                     item = None
-                elif not item.exercises and _duplicate_workout(connection, log_date, item):
+                elif not item.exercises and duplicate_workout(connection, log_date, item):
                     item = None
 
                 if item:
@@ -394,26 +182,28 @@ class LifeDatabase:
 
                     for exercise in exercises_to_insert:
                         exercise_id = connection.execute(
-                        """
-                        INSERT INTO workout_exercises
-                        (workout_id, name, sets, reps, load, duration_min, notes, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            workout_id,
-                            exercise.name,
-                            exercise.sets,
-                            exercise.reps,
-                            exercise.load,
-                            exercise.duration_min,
-                            exercise.notes,
-                            now,
-                        ),
+                            """
+                            INSERT INTO workout_exercises
+                            (workout_id, name, sets, reps, load, duration_min, notes, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            """,
+                            (
+                                workout_id,
+                                exercise.name,
+                                exercise.sets,
+                                exercise.reps,
+                                exercise.load,
+                                exercise.duration_min,
+                                exercise.notes,
+                                now,
+                            ),
                         ).lastrowid
-                        records["workout_exercises"].append({"id": exercise_id, **exercise.model_dump()})
+                        records["workout_exercises"].append(
+                            {"id": exercise_id, **exercise.model_dump()}
+                        )
 
             for item in parsed.career:
-                if _duplicate_career(connection, log_date, item):
+                if duplicate_career(connection, log_date, item):
                     continue
                 row_id = connection.execute(
                     """
@@ -440,7 +230,7 @@ class LifeDatabase:
 
             if parsed.journal:
                 item = parsed.journal
-                if not _duplicate_journal(connection, log_date, item):
+                if not duplicate_journal(connection, log_date, item):
                     row_id = connection.execute(
                         """
                         INSERT INTO journal_entries
@@ -512,56 +302,58 @@ class LifeDatabase:
 
     def deletable_logs(self, limit: int = 25, kind: str | None = None) -> list[dict[str, Any]]:
         bounded_limit = max(1, min(limit, 100))
-        kinds = [_canonical_kind(kind)] if kind else list(DELETABLE_LOG_KINDS)
+        kinds = [canonical_kind(kind)] if kind else list(DELETABLE_LOG_KINDS)
         rows: list[dict[str, Any]] = []
         with self.connect() as connection:
             for log_kind in kinds:
-                rows.extend(_deletable_rows(connection, log_kind, bounded_limit))
+                rows.extend(deletable_rows(connection, log_kind, bounded_limit))
         rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
         return rows[:bounded_limit]
 
-    def latest_deletable(self, kind: str | None = None, entry_date: str | None = None) -> list[dict[str, Any]]:
-        kinds = [_canonical_kind(kind)] if kind else ["raw_messages"]
+    def latest_deletable(
+        self, kind: str | None = None, entry_date: str | None = None
+    ) -> list[dict[str, Any]]:
+        kinds = [canonical_kind(kind)] if kind else ["raw_messages"]
         rows: list[dict[str, Any]] = []
         with self.connect() as connection:
             for log_kind in kinds:
-                rows.extend(_deletable_rows(connection, log_kind, 25, entry_date=entry_date))
+                rows.extend(deletable_rows(connection, log_kind, 25, entry_date=entry_date))
         rows.sort(key=lambda row: row.get("created_at") or "", reverse=True)
         return rows
 
     def delete_log(self, kind: str, record_id: int) -> dict[str, Any]:
-        canonical_kind = _canonical_kind(kind)
+        canon = canonical_kind(kind)
         if record_id < 1:
             raise ValueError("record_id must be positive")
 
         with self.connect() as connection:
-            row = _fetch_deletable_row(connection, canonical_kind, record_id)
+            row = fetch_deletable_row(connection, canon, record_id)
             if not row:
                 return {
                     "deleted": False,
-                    "kind": canonical_kind,
+                    "kind": canon,
                     "id": record_id,
                     "summary": None,
                     "counts": {},
                 }
 
             counts: dict[str, int] = {}
-            if canonical_kind == "raw_messages":
-                counts = _delete_raw_message(connection, record_id)
-            elif canonical_kind == "workout":
-                counts["workout_exercises"] = _delete_where(
+            if canon == "raw_messages":
+                counts = delete_raw_message(connection, record_id)
+            elif canon == "workout":
+                counts["workout_exercises"] = delete_where(
                     connection,
                     "DELETE FROM workout_exercises WHERE workout_id = ?",
                     (record_id,),
                 )
-                counts["workout"] = _delete_where(
+                counts["workout"] = delete_where(
                     connection,
                     "DELETE FROM workout_logs WHERE id = ?",
                     (record_id,),
                 )
             else:
-                table = _kind_table(canonical_kind)
-                counts[canonical_kind] = _delete_where(
+                table = kind_table(canon)
+                counts[canon] = delete_where(
                     connection,
                     f"DELETE FROM {table} WHERE id = ?",
                     (record_id,),
@@ -569,7 +361,7 @@ class LifeDatabase:
 
             return {
                 "deleted": True,
-                "kind": canonical_kind,
+                "kind": canon,
                 "id": record_id,
                 "summary": row["summary"],
                 "date": row.get("date"),
@@ -577,511 +369,13 @@ class LifeDatabase:
             }
 
 
-def _run_migrations(connection: sqlite3.Connection) -> None:
-    for table, columns in MIGRATIONS.items():
-        existing = _table_columns(connection, table)
-        for column, column_type in columns.items():
-            if column not in existing:
-                connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-
-    connection.execute(
-        """
-        UPDATE raw_messages
-        SET received_at = COALESCE(received_at, created_at),
-            user_text = COALESCE(user_text, text),
-            processed = COALESCE(processed, 1)
-        """
-    )
-    connection.execute(
-        """
-        UPDATE nutrition_logs
-        SET date = COALESCE(date, entry_date),
-            source_message_id = COALESCE(source_message_id, raw_message_id),
-            description = COALESCE(description, meal_name)
-        """
-    )
-    connection.execute(
-        """
-        UPDATE workout_logs
-        SET date = COALESCE(date, entry_date),
-            source_message_id = COALESCE(source_message_id, raw_message_id)
-        """
-    )
-    connection.execute(
-        """
-        UPDATE career_logs
-        SET date = COALESCE(date, entry_date),
-            source_message_id = COALESCE(source_message_id, raw_message_id)
-        """
-    )
-    connection.execute(
-        """
-        UPDATE journal_entries
-        SET date = COALESCE(date, entry_date),
-            source_message_id = COALESCE(source_message_id, raw_message_id)
-        """
-    )
-
-
-def _table_columns(connection: sqlite3.Connection, table: str) -> set[str]:
-    return {row["name"] for row in _query_rows(connection, f"PRAGMA table_info({table})", ())}
-
-
-def _has_wellbeing_signal(item) -> bool:
-    return any(
-        value is not None
-        for value in (
-            item.sleep_hours,
-            item.sleep_quality,
-            item.energy,
-            item.stress,
-            item.mood,
-            item.notes,
-        )
-    )
-
-
-def _enrich_from_history(connection: Any, parsed: ParsedDailyLog, log_date: str) -> None:
-    if not parsed.workout:
-        return
-    for exercise in parsed.workout.exercises:
-        previous = _rows(
-            connection,
-            """
-            SELECT e.sets, e.reps, e.load, e.duration_min
-            FROM workout_exercises e
-            JOIN workout_logs w ON w.id = e.workout_id
-            WHERE LOWER(e.name) = LOWER(?) AND w.date < ?
-            ORDER BY w.date DESC, e.created_at DESC
-            LIMIT 1
-            """,
-            (exercise.name, log_date),
-        )
-        if not previous:
-            continue
-        row = previous[0]
-        if exercise.sets is None:
-            exercise.sets = row["sets"]
-        if exercise.reps is None:
-            exercise.reps = row["reps"]
-        if exercise.load is None:
-            exercise.load = row["load"]
-        if exercise.duration_min is None:
-            exercise.duration_min = row["duration_min"]
-
-
-def _duplicate_daily_checkin(connection: Any, log_date: str, item: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1 FROM daily_checkins
-        WHERE date = ?
-          AND sleep_hours IS ?
-          AND sleep_quality IS ?
-          AND energy IS ?
-          AND stress IS ?
-          AND mood IS ?
-          AND COALESCE(notes, '') = COALESCE(?, '')
-        LIMIT 1
-        """,
-        (log_date, item.sleep_hours, item.sleep_quality, item.energy, item.stress, item.mood, item.notes),
-    )
-
-
-def _duplicate_nutrition(connection: Any, log_date: str, item: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1 FROM nutrition_logs
-        WHERE date = ?
-          AND COALESCE(meal_type, '') = COALESCE(?, '')
-          AND LOWER(COALESCE(description, meal_name, '')) = LOWER(?)
-        LIMIT 1
-        """,
-        (log_date, item.meal_type, item.description),
-    )
-
-
-def _duplicate_workout(connection: Any, log_date: str, item: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1 FROM workout_logs
-        WHERE date = ?
-          AND COALESCE(workout_type, '') = COALESCE(?, '')
-          AND duration_min IS ?
-          AND distance_km IS ?
-          AND pace IS ?
-          AND intensity IS ?
-        LIMIT 1
-        """,
-        (log_date, item.workout_type, item.duration_min, item.distance_km, item.pace, item.intensity),
-    )
-
-
-def _duplicate_exercise(connection: Any, log_date: str, exercise: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1
-        FROM workout_exercises e
-        JOIN workout_logs w ON w.id = e.workout_id
-        WHERE w.date = ?
-          AND LOWER(e.name) = LOWER(?)
-          AND e.sets IS ?
-          AND e.reps IS ?
-          AND COALESCE(e.load, '') = COALESCE(?, '')
-          AND e.duration_min IS ?
-        LIMIT 1
-        """,
-        (log_date, exercise.name, exercise.sets, exercise.reps, exercise.load, exercise.duration_min),
-    )
-
-
-def _duplicate_career(connection: Any, log_date: str, item: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1 FROM career_logs
-        WHERE date = ?
-          AND COALESCE(project, '') = COALESCE(?, '')
-          AND duration_hours IS ?
-          AND COALESCE(progress_note, '') = COALESCE(?, '')
-        LIMIT 1
-        """,
-        (log_date, item.project, item.duration_hours, item.progress_note),
-    )
-
-
-def _duplicate_journal(connection: Any, log_date: str, item: Any) -> bool:
-    return _exists(
-        connection,
-        """
-        SELECT 1 FROM journal_entries
-        WHERE date = ? AND text = ?
-        LIMIT 1
-        """,
-        (log_date, item.text),
-    )
-
-
-def _exists(connection: Any, query: str, params: tuple[Any, ...]) -> bool:
-    return bool(_rows(connection, query, params))
-
-
-def _canonical_kind(kind: str | None) -> str:
-    normalized = (kind or "raw_messages").strip().lower().replace("-", "_")
-    aliases = {
-        "raw": "raw_messages",
-        "raw_message": "raw_messages",
-        "raw_messages": "raw_messages",
-        "log": "raw_messages",
-        "logs": "raw_messages",
-        "message": "raw_messages",
-        "messages": "raw_messages",
-        "daily": "daily_checkins",
-        "daily_checkin": "daily_checkins",
-        "daily_checkins": "daily_checkins",
-        "checkin": "daily_checkins",
-        "checkins": "daily_checkins",
-        "wellbeing": "daily_checkins",
-        "wellbeing_log": "daily_checkins",
-        "nutrition": "nutrition",
-        "nutrition_log": "nutrition",
-        "nutrition_logs": "nutrition",
-        "meal": "nutrition",
-        "meals": "nutrition",
-        "food": "nutrition",
-        "workout": "workout",
-        "workouts": "workout",
-        "workout_log": "workout",
-        "workout_logs": "workout",
-        "exercise": "workout_exercises",
-        "exercises": "workout_exercises",
-        "workout_exercise": "workout_exercises",
-        "workout_exercises": "workout_exercises",
-        "career": "career",
-        "career_log": "career",
-        "career_logs": "career",
-        "work": "career",
-        "journal": "journal",
-        "journal_entry": "journal",
-        "journal_entries": "journal",
-        "memory": "memory",
-        "memories": "memory",
-        "memory_item": "memory",
-        "memory_items": "memory",
-    }
-    canonical = aliases.get(normalized)
-    if canonical not in DELETABLE_LOG_KINDS:
-        raise ValueError(f"Unsupported log kind: {kind}")
-    return canonical
-
-
-def _kind_table(kind: str) -> str:
-    return {
-        "raw_messages": "raw_messages",
-        "daily_checkins": "daily_checkins",
-        "nutrition": "nutrition_logs",
-        "workout": "workout_logs",
-        "workout_exercises": "workout_exercises",
-        "career": "career_logs",
-        "journal": "journal_entries",
-        "memory": "memory_items",
-    }[kind]
-
-
-def _deletable_rows(
-    connection: Any,
-    kind: str,
-    limit: int,
-    entry_date: str | None = None,
-) -> list[dict[str, Any]]:
-    date_filter = "AND date = ?" if entry_date else ""
-    params: tuple[Any, ...]
-    if kind == "raw_messages":
-        raw_filter = "WHERE entry_date = ?" if entry_date else ""
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'raw_messages' AS kind,
-                   entry_date AS date,
-                   COALESCE(received_at, created_at) AS created_at,
-                   COALESCE(user_text, text, '') AS summary
-            FROM raw_messages
-            {raw_filter}
-            ORDER BY COALESCE(received_at, created_at) DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "daily_checkins":
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'daily_checkins' AS kind,
-                   date,
-                   created_at,
-                   TRIM(
-                       COALESCE('energy ' || energy || ' ', '') ||
-                       COALESCE('stress ' || stress || ' ', '') ||
-                       COALESCE('mood ' || mood || ' ', '') ||
-                       COALESCE(notes, '')
-                   ) AS summary
-            FROM daily_checkins
-            WHERE 1 = 1 {date_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "nutrition":
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'nutrition' AS kind,
-                   date,
-                   created_at,
-                   TRIM(COALESCE(meal_type || ': ', '') || COALESCE(description, meal_name, 'meal')) AS summary
-            FROM nutrition_logs
-            WHERE 1 = 1 {date_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "workout":
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'workout' AS kind,
-                   date,
-                   created_at,
-                   TRIM(COALESCE(workout_type, 'workout') || COALESCE(' - ' || notes, '')) AS summary
-            FROM workout_logs
-            WHERE 1 = 1 {date_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "workout_exercises":
-        exercise_filter = "AND w.date = ?" if entry_date else ""
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT e.id,
-                   'workout_exercises' AS kind,
-                   w.date,
-                   e.created_at,
-                   TRIM(
-                       e.name ||
-                       COALESCE(' ' || e.sets || 'x' || e.reps, '') ||
-                       COALESCE(' at ' || e.load, '')
-                   ) AS summary
-            FROM workout_exercises e
-            JOIN workout_logs w ON w.id = e.workout_id
-            WHERE 1 = 1 {exercise_filter}
-            ORDER BY e.created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "career":
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'career' AS kind,
-                   date,
-                   created_at,
-                   TRIM(
-                       COALESCE(duration_hours || 'h ', '') ||
-                       COALESCE(project, 'career') ||
-                       COALESCE(' - ' || progress_note, '')
-                   ) AS summary
-            FROM career_logs
-            WHERE 1 = 1 {date_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "journal":
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'journal' AS kind,
-                   date,
-                   created_at,
-                   text AS summary
-            FROM journal_entries
-            WHERE 1 = 1 {date_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    elif kind == "memory":
-        memory_filter = "WHERE DATE(created_at) = ?" if entry_date else ""
-        params = (entry_date, limit) if entry_date else (limit,)
-        rows = _rows(
-            connection,
-            f"""
-            SELECT id,
-                   'memory' AS kind,
-                   DATE(created_at) AS date,
-                   created_at,
-                   TRIM(category || ': ' || value) AS summary
-            FROM memory_items
-            {memory_filter}
-            ORDER BY created_at DESC
-            LIMIT ?
-            """,
-            params,
-        )
-    else:
-        raise ValueError(f"Unsupported log kind: {kind}")
-
-    for row in rows:
-        row["summary"] = _truncate(row.get("summary") or row["kind"])
-    return rows
-
-
-def _fetch_deletable_row(connection: Any, kind: str, record_id: int) -> dict[str, Any] | None:
-    candidates = _deletable_rows(connection, kind, 100)
-    for row in candidates:
-        if row["id"] == record_id:
-            return row
-    table = _kind_table(kind)
-    exists = _rows(connection, f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (record_id,))
-    if not exists:
-        return None
-    return {"kind": kind, "id": record_id, "summary": f"{kind} #{record_id}"}
-
-
-def _delete_raw_message(connection: Any, raw_id: int) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    workout_ids = [
-        row["id"]
-        for row in _rows(
-            connection,
-            """
-            SELECT id FROM workout_logs
-            WHERE source_message_id = ? OR raw_message_id = ?
-            """,
-            (raw_id, raw_id),
-        )
-    ]
-    for workout_id in workout_ids:
-        counts["workout_exercises"] = counts.get("workout_exercises", 0) + _delete_where(
-            connection,
-            "DELETE FROM workout_exercises WHERE workout_id = ?",
-            (workout_id,),
-        )
-
-    for kind in ("daily_checkins", "nutrition", "workout", "career", "journal"):
-        table = _kind_table(kind)
-        counts[kind] = _delete_where(
-            connection,
-            f"DELETE FROM {table} WHERE source_message_id = ? OR raw_message_id = ?",
-            (raw_id, raw_id),
-        )
-    counts["wellbeing_logs"] = _delete_where(
-        connection,
-        "DELETE FROM wellbeing_logs WHERE source_message_id = ? OR raw_message_id = ?",
-        (raw_id, raw_id),
-    )
-    counts["memory"] = _delete_where(
-        connection,
-        "DELETE FROM memory_items WHERE source_message_id = ?",
-        (raw_id,),
-    )
-    counts["raw_messages"] = _delete_where(
-        connection,
-        "DELETE FROM raw_messages WHERE id = ?",
-        (raw_id,),
-    )
-    return counts
-
-
-def _delete_where(connection: Any, query: str, params: tuple[Any, ...]) -> int:
-    cursor = connection.execute(query, params)
-    rowcount = getattr(cursor, "rowcount", None)
-    return int(rowcount) if isinstance(rowcount, int) and rowcount >= 0 else 0
-
-
-def _truncate(value: str, limit: int = 96) -> str:
-    compact = " ".join(value.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 1].rstrip() + "..."
-
-
-def _rows(connection: sqlite3.Connection, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    return _query_rows(connection, query, params)
-
-
-def _query_rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+def _rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
     cursor = connection.execute(query, params)
     rows = cursor.fetchall()
     if not rows:
         return []
     if isinstance(rows[0], sqlite3.Row):
         return [dict(row) for row in rows]
-
     columns = [column[0] for column in cursor.description]
     return [dict(zip(columns, row)) for row in rows]
 

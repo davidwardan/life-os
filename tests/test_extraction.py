@@ -57,7 +57,9 @@ class ExtractionTests(TestCase):
     def test_journal_fallback_when_no_structured_signals(self) -> None:
         parsed = extract_daily_log("Thinking through whether I am overcommitting this week.")
 
-        self.assertEqual(parsed.journal_text, "Thinking through whether I am overcommitting this week.")
+        self.assertEqual(
+            parsed.journal_text, "Thinking through whether I am overcommitting this week."
+        )
         self.assertEqual(parsed.nutrition, [])
         self.assertIsNone(parsed.workout)
 
@@ -74,7 +76,10 @@ class ExtractionTests(TestCase):
             any("exercises" in question.lower() for question in parsed.clarification_questions)
         )
         self.assertTrue(
-            any("energy" in question.lower() or "stress" in question.lower() for question in parsed.clarification_questions)
+            any(
+                "energy" in question.lower() or "stress" in question.lower()
+                for question in parsed.clarification_questions
+            )
         )
 
     def test_bare_exercise_reply_extracts_workout_exercises(self) -> None:
@@ -137,5 +142,12 @@ class ExtractionTests(TestCase):
         self.assertEqual(parsed.wellbeing.energy, 3)
         self.assertEqual(parsed.wellbeing.stress, 3)
         self.assertIn("destroyed", parsed.wellbeing.notes.lower())
-        self.assertFalse(any("sets" in question.lower() for question in parsed.clarification_questions))
-        self.assertFalse(any("what kind of training" in question.lower() for question in parsed.clarification_questions))
+        self.assertFalse(
+            any("sets" in question.lower() for question in parsed.clarification_questions)
+        )
+        self.assertFalse(
+            any(
+                "what kind of training" in question.lower()
+                for question in parsed.clarification_questions
+            )
+        )

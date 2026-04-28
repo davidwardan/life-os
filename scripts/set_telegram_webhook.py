@@ -16,7 +16,9 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Register the Life OS Telegram webhook.")
-    parser.add_argument("public_url", help="Public HTTPS base URL, for example https://example.trycloudflare.com")
+    parser.add_argument(
+        "public_url", help="Public HTTPS base URL, for example https://example.trycloudflare.com"
+    )
     args = parser.parse_args()
 
     load_dotenv(ROOT_DIR / ".env")
@@ -62,4 +64,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

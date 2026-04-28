@@ -46,8 +46,7 @@ class Briefing:
 
 
 class BriefingClient(Protocol):
-    async def write(self, features: dict[str, Any], target_date: date) -> str:
-        ...
+    async def write(self, features: dict[str, Any], target_date: date) -> str: ...
 
 
 class OpenRouterBriefingClient:
@@ -74,7 +73,9 @@ class OpenRouterBriefingClient:
                 errors.append(f"{model}: {_format_error(error)}")
         raise ValueError("; ".join(errors))
 
-    async def _write_with_model(self, model: str, features: dict[str, Any], target_date: date) -> str:
+    async def _write_with_model(
+        self, model: str, features: dict[str, Any], target_date: date
+    ) -> str:
         payload = {
             "model": model,
             "messages": [
@@ -130,7 +131,9 @@ class BriefingService:
 
         client = self.client or _configured_briefing_client()
         if client is None:
-            return Briefing(date=briefing_date, features=features, text=deterministic, method="deterministic")
+            return Briefing(
+                date=briefing_date, features=features, text=deterministic, method="deterministic"
+            )
 
         try:
             text = await client.write(features, briefing_date)
@@ -257,7 +260,9 @@ class BriefingService:
             "entries_7d": len(rows),
             "deep_work_hours_7d": _sum(row["duration_hours"] for row in rows),
             "top_projects_7d": projects,
-            "recent_progress": [row["progress_note"] for row in rows[-4:] if row.get("progress_note")],
+            "recent_progress": [
+                row["progress_note"] for row in rows[-4:] if row.get("progress_note")
+            ],
             "recent_blockers": [row["blockers"] for row in rows[-4:] if row.get("blockers")],
         }
 
@@ -360,7 +365,8 @@ def is_briefing_request(text: str) -> bool:
     )
     command_markers = ("send", "provide", "give", "show", "make", "generate")
     return any(marker in lower for marker in request_markers) and (
-        lower.startswith(command_markers) or any(f" {marker}" in lower for marker in command_markers)
+        lower.startswith(command_markers)
+        or any(f" {marker}" in lower for marker in command_markers)
     )
 
 
@@ -395,7 +401,9 @@ def _deterministic_briefing(target_date: date, features: dict[str, Any]) -> str:
     )
 
 
-def _today_line(sleep: float | None, energy: float | None, stress: float | None, training_days: int) -> str:
+def _today_line(
+    sleep: float | None, energy: float | None, stress: float | None, training_days: int
+) -> str:
     if energy is None and stress is None and sleep is None:
         return "Not enough wellbeing data yet. Log sleep, energy, and stress today."
     if stress is not None and stress >= 7:

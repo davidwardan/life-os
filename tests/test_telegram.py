@@ -190,7 +190,9 @@ class TelegramTests(IsolatedAsyncioTestCase):
             self.assertTrue(Path(client.photos[0][1]).exists())
             self.assertEqual(len(db.recent_logs()["raw_messages"]), 1)
 
-    async def test_multiple_plot_requests_send_multiple_photos_without_logging_message(self) -> None:
+    async def test_multiple_plot_requests_send_multiple_photos_without_logging_message(
+        self,
+    ) -> None:
         with TemporaryDirectory() as directory:
             db = LifeDatabase(Path(directory) / "life.sqlite3")
             db.save_message(

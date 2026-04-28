@@ -32,8 +32,12 @@ class MemoryStorageTests(TestCase):
         with TemporaryDirectory() as directory:
             service = MemoryService(LifeDatabase(Path(directory) / "life.sqlite3"))
 
-            first = service.learn_from_message("Remember that briefings should be direct and concise.")
-            second = service.learn_from_message("Remember that briefings should be direct and concise.")
+            first = service.learn_from_message(
+                "Remember that briefings should be direct and concise."
+            )
+            second = service.learn_from_message(
+                "Remember that briefings should be direct and concise."
+            )
             items = service.list_items(category="briefing_style")
 
             self.assertEqual(len(first), 1)
@@ -44,7 +48,9 @@ class MemoryStorageTests(TestCase):
     def test_briefing_context_groups_active_memory(self) -> None:
         with TemporaryDirectory() as directory:
             service = MemoryService(LifeDatabase(Path(directory) / "life.sqlite3"))
-            service.learn_from_message("I like Swiss minimalist plots. Training early works for me.")
+            service.learn_from_message(
+                "I like Swiss minimalist plots. Training early works for me."
+            )
 
             context = service.briefing_context()
 

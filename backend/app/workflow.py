@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Literal, TypedDict
 
-from backend.app.agent_planning import AgentPlan, AgentPlanner, PlannedAction, configured_agent_planner
+from backend.app.agent_planning import (
+    AgentPlan,
+    AgentPlanner,
+    PlannedAction,
+    configured_agent_planner,
+)
 from backend.app.briefing import Briefing, BriefingService, is_briefing_request
 from backend.app.db import LifeDatabase
 from backend.app.deletion import DeleteResult, handle_delete_request, is_delete_request
@@ -13,6 +19,8 @@ from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService, is_memory_request
 from backend.app.plotting import PlotResult, PlotService, parse_plot_requests
 from backend.app.schemas import MessageIn, ParsedDailyLog
+
+logger = logging.getLogger(__name__)
 
 
 Intent = Literal["ignore", "memory", "delete", "briefing", "plot", "log"]
@@ -112,13 +120,12 @@ class AgentWorkflow:
                 context=self._planning_context(state.get("entry_date")),
             )
         except Exception:
+            logger.exception("Agent planner failed; falling back to deterministic classification")
             return None
 
     async def _execute_plan(self, state: WorkflowState, plan: AgentPlan) -> WorkflowResult:
         actions = [
-            action
-            for action in plan.actions
-            if action.intent != "ignore" or len(plan.actions) == 1
+            action for action in plan.actions if action.intent != "ignore" or len(plan.actions) == 1
         ]
         if not actions:
             actions = [PlannedAction(intent="ignore", text=state["text"])]
@@ -271,7 +278,9 @@ class AgentWorkflow:
             MessageIn(text=state["text"], entry_date=entry_date, source=state["source"]),
             parsed,
         )
-        learned = self.memory_service.learn_from_message(state["text"], parsed, saved["raw_message_id"])
+        learned = self.memory_service.learn_from_message(
+            state["text"], parsed, saved["raw_message_id"]
+        )
         confirmation = format_log_confirmation(saved["raw_message_id"], parsed, method, error)
         duplicate_note = format_duplicate_note(parsed, saved["records"])
         if duplicate_note:
@@ -322,7 +331,9 @@ def _combine_action_results(results: tuple[WorkflowResult, ...], plan: AgentPlan
         ok=all(result.ok for result in results),
         status="completed_actions",
         confirmation="\n\n".join(confirmations) if confirmations else None,
-        raw_message_id=next((result.raw_message_id for result in results if result.raw_message_id), None),
+        raw_message_id=next(
+            (result.raw_message_id for result in results if result.raw_message_id), None
+        ),
         parsed=next((result.parsed for result in results if result.parsed is not None), None),
         records=records or None,
         extraction_method=next(
@@ -416,22 +427,70 @@ def format_log_confirmation(
     return "\n".join(lines)
 
 
-def format_duplicate_note(parsed: ParsedDailyLog, records: dict[str, list[dict[str, Any]]]) -> str | None:
-    skipped = []
+def format_duplicate_note(
+    parsed: ParsedDailyLog, records: dict[str, list[dict[str, Any]]]
+) -> str | None:
+    skipped: list[str] = []
     if parsed.wellbeing and not records.get("daily_checkins"):
-        skipped.append("wellbeing")
-    if parsed.nutrition and not records.get("nutrition"):
-        skipped.append("nutrition")
+        skipped.append(_summarize_wellbeing_dup(parsed.wellbeing))
+    if parsed.nutrition:
+        kept_descriptions = {
+            (row.get("meal_type"), (row.get("description") or "").lower())
+            for row in records.get("nutrition") or []
+        }
+        for item in parsed.nutrition:
+            key = (item.meal_type, (item.description or "").lower())
+            if key in kept_descriptions:
+                continue
+            label = item.meal_type or "meal"
+            description = item.description or "?"
+            skipped.append(f"{label}: {description}")
     if parsed.workout and not records.get("workout") and not records.get("workout_exercises"):
-        skipped.append("workout")
-    if parsed.career and not records.get("career"):
-        skipped.append("career")
+        skipped.append(_summarize_workout_dup(parsed.workout))
+    if parsed.career:
+        kept_projects = {
+            (row.get("project"), row.get("progress_note")) for row in records.get("career") or []
+        }
+        for item in parsed.career:
+            if (item.project, item.progress_note) in kept_projects:
+                continue
+            project = item.project or "career"
+            note = f" - {item.progress_note}" if item.progress_note else ""
+            skipped.append(f"{project}{note}")
     if parsed.journal and not records.get("journal"):
-        skipped.append("journal")
+        skipped.append(_truncate_journal(parsed.journal.text))
     if not skipped:
         return None
-    label = ", ".join(skipped)
-    return f"Already logged: skipped duplicate structured rows for {label}."
+    return "Already logged (skipped): " + "; ".join(skipped) + "."
+
+
+def _summarize_wellbeing_dup(item: Any) -> str:
+    parts: list[str] = []
+    if item.sleep_hours is not None:
+        parts.append(f"sleep {item.sleep_hours:g}h")
+    if item.energy is not None:
+        parts.append(f"energy {item.energy}/10")
+    if item.stress is not None:
+        parts.append(f"stress {item.stress}/10")
+    if item.mood is not None:
+        parts.append(f"mood {item.mood}/10")
+    return "wellbeing (" + ", ".join(parts) + ")" if parts else "wellbeing"
+
+
+def _summarize_workout_dup(item: Any) -> str:
+    name = item.workout_type or "workout"
+    if item.duration_min is not None:
+        return f"{name} ({item.duration_min:g} min)"
+    if item.distance_km is not None:
+        return f"{name} ({item.distance_km:g} km)"
+    return name
+
+
+def _truncate_journal(text: str, limit: int = 60) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return f"journal: {compact}"
+    return f"journal: {compact[: limit - 1].rstrip()}..."
 
 
 def format_memory_confirmation(items: list[dict[str, Any]]) -> str:
@@ -450,7 +509,9 @@ def format_learned_memory_note(items: list[dict[str, Any]]) -> str:
     return f"Also remembered {len(items)} durable preferences or strategies."
 
 
-def _logs_for_date(logs: dict[str, list[dict[str, Any]]], target_date: str | None) -> dict[str, list[dict[str, Any]]]:
+def _logs_for_date(
+    logs: dict[str, list[dict[str, Any]]], target_date: str | None
+) -> dict[str, list[dict[str, Any]]]:
     if target_date is None:
         return {}
     return {

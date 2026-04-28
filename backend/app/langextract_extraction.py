@@ -49,8 +49,7 @@ Useful attributes:
 
 
 class LangExtractRunner(Protocol):
-    async def extract(self, text: str, entry_date: date) -> list[Any]:
-        ...
+    async def extract(self, text: str, entry_date: date) -> list[Any]: ...
 
 
 class LangExtractClient:
@@ -320,7 +319,10 @@ def _examples(lx: Any) -> list[Any]:
                 lx.data.Extraction(
                     extraction_class="journal",
                     extraction_text="Mood was okay but I felt mentally drained",
-                    attributes={"text": "Mood was okay but I felt mentally drained.", "tags": ["fatigue", "research"]},
+                    attributes={
+                        "text": "Mood was okay but I felt mentally drained.",
+                        "tags": ["fatigue", "research"],
+                    },
                 ),
             ],
         )

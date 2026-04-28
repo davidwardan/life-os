@@ -68,8 +68,7 @@ class LLMClient(Protocol):
         text: str,
         entry_date: date,
         context: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        ...
+    ) -> dict[str, Any]: ...
 
 
 class OpenRouterClient:
@@ -230,10 +229,20 @@ class ExtractionService:
                 parsed.entry_date = entry_date
             _reconcile_with_deterministic(parsed, text, target_date)
             return parsed, "llm", None
-        except (asyncio.TimeoutError, httpx.HTTPError, json.JSONDecodeError, ValidationError, ValueError) as error:
+        except (
+            asyncio.TimeoutError,
+            httpx.HTTPError,
+            json.JSONDecodeError,
+            ValidationError,
+            ValueError,
+        ) as error:
             fallback = extract_daily_log(text, target_date)
             prefix = f"{langextract_error}; " if langextract_error else ""
-            return fallback, "deterministic", f"{prefix}LLM extraction failed: {_format_error(error)}"
+            return (
+                fallback,
+                "deterministic",
+                f"{prefix}LLM extraction failed: {_format_error(error)}",
+            )
 
 
 def _configured_llm_client() -> OpenRouterClient | None:
@@ -262,11 +271,7 @@ async def _extract_with_optional_context(
 
 def _has_structured_signal(parsed: ParsedDailyLog) -> bool:
     return bool(
-        parsed.wellbeing
-        or parsed.nutrition
-        or parsed.workout
-        or parsed.career
-        or parsed.journal
+        parsed.wellbeing or parsed.nutrition or parsed.workout or parsed.career or parsed.journal
     )
 
 
@@ -284,7 +289,14 @@ def _reconcile_with_deterministic(parsed: ParsedDailyLog, text: str, target_date
         if parsed.workout is None:
             parsed.workout = deterministic.workout
         else:
-            for field in ("workout_type", "duration_min", "distance_km", "pace", "intensity", "notes"):
+            for field in (
+                "workout_type",
+                "duration_min",
+                "distance_km",
+                "pace",
+                "intensity",
+                "notes",
+            ):
                 if getattr(parsed.workout, field) is None:
                     setattr(parsed.workout, field, getattr(deterministic.workout, field))
             if not parsed.workout.exercises and deterministic.workout.exercises:

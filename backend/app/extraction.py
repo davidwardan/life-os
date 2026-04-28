@@ -18,6 +18,10 @@ from backend.app.followup import build_followup_questions
 _NUMBER = r"(\d+(?:\.\d+)?)"
 
 
+def _confidence(base: float, signals: int, *, per_signal: float = 0.08, cap: float = 0.95) -> float:
+    return min(cap, base + signals * per_signal)
+
+
 def extract_daily_log(text: str, entry_date: date | None = None) -> ParsedDailyLog:
     normalized = " ".join(text.strip().split())
     log_date = entry_date or date.today()
@@ -52,11 +56,11 @@ def contains_non_logging_reply(text: str) -> bool:
 
 
 _NON_LOGGING_REPLIES = (
-        "i do not want to give more info",
-        "i don't want to give more info",
-        "no more info",
-        "no thanks",
-        "skip",
+    "i do not want to give more info",
+    "i don't want to give more info",
+    "no more info",
+    "no thanks",
+    "skip",
 )
 
 
@@ -89,23 +93,35 @@ def _extract_wellbeing(text: str) -> WellbeingEntry | None:
     if "destroyed" in lower:
         notes.append("Felt destroyed after training.")
 
-    if all(value is None for value in (mood, energy, stress, sleep_quality)) and sleep_match is None and not notes:
+    if (
+        all(value is None for value in (mood, energy, stress, sleep_quality))
+        and sleep_match is None
+        and not notes
+    ):
         return None
+
+    sleep_hours = float(sleep_match.group(1)) if sleep_match else None
+    explicit_signals = sum(
+        1 for value in (mood, energy, stress, sleep_quality, sleep_hours) if value is not None
+    )
 
     return WellbeingEntry(
         mood=mood,
         energy=energy,
         stress=stress,
-        sleep_hours=float(sleep_match.group(1)) if sleep_match else None,
+        sleep_hours=sleep_hours,
         sleep_quality=sleep_quality,
         notes=" ".join(notes) or None,
-        confidence=0.78,
+        confidence=_confidence(0.55, explicit_signals),
     )
 
 
 def _extract_nutrition(text: str) -> list[NutritionEntry]:
     lower = text.lower()
-    if not any(marker in lower for marker in ("ate ", "had ", "meal", "breakfast", "lunch", "dinner", "morning")):
+    if not any(
+        marker in lower
+        for marker in ("ate ", "had ", "meal", "breakfast", "lunch", "dinner", "morning")
+    ):
         return []
 
     entries: list[NutritionEntry] = []
@@ -120,13 +136,19 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
         breakfast = re.sub(r"\s+in the morning$", "", breakfast, flags=re.I).strip(" .")
         if _looks_like_food(breakfast):
             calories = _estimate_calories(breakfast)
+            meal_type = "breakfast" if "morning" in lower or "breakfast" in lower else None
             entries.append(
                 NutritionEntry(
-                    meal_type="breakfast" if "morning" in lower or "breakfast" in lower else None,
+                    meal_type=meal_type,
                     description=breakfast,
                     calories=calories,
                     estimated=calories is not None,
-                    confidence=0.72 if calories is None else 0.62,
+                    confidence=_nutrition_confidence(
+                        meal_type=meal_type,
+                        explicit_calories=False,
+                        explicit_protein=False,
+                        estimated=calories is not None,
+                    ),
                 )
             )
 
@@ -137,7 +159,9 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
     )
     if lunch_match:
         description = lunch_match.group(1).strip(" .")
-        protein_g = 55.0 if re.search(r"180\s*g\s+cooked\s+chicken", description, flags=re.I) else None
+        protein_g = (
+            55.0 if re.search(r"180\s*g\s+cooked\s+chicken", description, flags=re.I) else None
+        )
         calories = _estimate_calories(description)
         entries.append(
             NutritionEntry(
@@ -146,7 +170,12 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
                 calories=calories,
                 protein_g=protein_g,
                 estimated=protein_g is not None or calories is not None,
-                confidence=0.75 if protein_g is not None else 0.7,
+                confidence=_nutrition_confidence(
+                    meal_type="lunch",
+                    explicit_calories=False,
+                    explicit_protein=protein_g is not None,
+                    estimated=protein_g is not None or calories is not None,
+                ),
             )
         )
 
@@ -164,10 +193,14 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
                 description=description,
                 calories=calories,
                 estimated=calories is not None,
-                confidence=0.7 if calories is None else 0.62,
+                confidence=_nutrition_confidence(
+                    meal_type="dinner",
+                    explicit_calories=False,
+                    explicit_protein=False,
+                    estimated=calories is not None,
+                ),
             )
         ]
-        entries.extend(dinner_entries)
 
     if entries:
         return entries
@@ -193,18 +226,46 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
         parts = [meal_text or text]
 
     for index, part in enumerate(parts):
-        calories = float(calorie_match.group(1)) if calorie_match and index == 0 else _estimate_calories(part)
+        explicit_calories_here = bool(calorie_match) and index == 0
+        explicit_protein_here = bool(protein_match) and index == 0
+        calories = (
+            float(calorie_match.group(1)) if explicit_calories_here else _estimate_calories(part)
+        )
+        protein_g = float(protein_match.group(1)) if explicit_protein_here else None
         entries.append(
             NutritionEntry(
                 meal_type=None,
                 description=part,
                 calories=calories,
-                protein_g=float(protein_match.group(1)) if protein_match and index == 0 else None,
-                estimated=not bool(calorie_match and index == 0) and calories is not None,
-                confidence=0.74 if calorie_match or protein_match else 0.58,
+                protein_g=protein_g,
+                estimated=not explicit_calories_here and calories is not None,
+                confidence=_nutrition_confidence(
+                    meal_type=None,
+                    explicit_calories=explicit_calories_here,
+                    explicit_protein=explicit_protein_here,
+                    estimated=not explicit_calories_here and calories is not None,
+                ),
             )
         )
     return entries
+
+
+def _nutrition_confidence(
+    *,
+    meal_type: str | None,
+    explicit_calories: bool,
+    explicit_protein: bool,
+    estimated: bool,
+) -> float:
+    base = 0.55
+    signals = 0
+    if meal_type:
+        signals += 1
+    if explicit_calories:
+        signals += 2
+    if explicit_protein:
+        signals += 2
+    return _confidence(base, signals)
 
 
 def _extract_workout(text: str) -> WorkoutEntry | None:
@@ -261,15 +322,27 @@ def _extract_workout(text: str) -> WorkoutEntry | None:
     if workout_type is None and exercises:
         workout_type = "strength"
 
+    duration_min = float(duration_match.group(1)) if duration_match and not exercises else None
+    distance_km = float(distance_match.group(1)) if distance_match else None
+    pace = float(pace_match.group(1)) if pace_match else None
+    intensity = int(float(intensity_match.group(1))) if intensity_match else None
+
+    structured_exercises = sum(1 for ex in exercises if ex.sets is not None and ex.reps is not None)
+    explicit_signals = sum(
+        bool(value) for value in (workout_type, duration_min, distance_km, pace, intensity)
+    )
+    base = 0.45 if not (workout_type or exercises) else 0.6
+    confidence = _confidence(base, explicit_signals + structured_exercises)
+
     return WorkoutEntry(
         workout_type=workout_type,
-        duration_min=float(duration_match.group(1)) if duration_match and not exercises else None,
-        distance_km=float(distance_match.group(1)) if distance_match else None,
-        pace=float(pace_match.group(1)) if pace_match else None,
-        intensity=int(float(intensity_match.group(1))) if intensity_match else None,
+        duration_min=duration_min,
+        distance_km=distance_km,
+        pace=pace,
+        intensity=intensity,
         notes=None if exercises else text,
         exercises=exercises,
-        confidence=0.76 if exercises or workout_type else 0.52,
+        confidence=confidence,
     )
 
 
@@ -344,7 +417,10 @@ def _extract_exercises(text: str) -> list[ExerciseEntry]:
 
 def _extract_career(text: str) -> list[CareerEntry]:
     lower = text.lower()
-    if not any(marker in lower for marker in ("worked", "deep work", "paper", "career", "project", "research")):
+    if not any(
+        marker in lower
+        for marker in ("worked", "deep work", "paper", "career", "project", "research")
+    ):
         return []
 
     duration_match = re.search(
@@ -361,9 +437,13 @@ def _extract_career(text: str) -> list[CareerEntry]:
         flags=re.I,
     )
     if project_match is None:
-        project_match = re.search(r"(?:paper|project|research)\s+(?:on|for)\s+([^.;]+)", text, flags=re.I)
+        project_match = re.search(
+            r"(?:paper|project|research)\s+(?:on|for)\s+([^.;]+)", text, flags=re.I
+        )
     if project_match:
-        project = project_match.group(2 if project_match.lastindex and project_match.lastindex > 1 else 1).strip()
+        project = project_match.group(
+            2 if project_match.lastindex and project_match.lastindex > 1 else 1
+        ).strip()
         project = re.split(
             r"\s+and\s+(?:fixed|finished|drafted|wrote|advanced|completed)\b",
             project,
@@ -372,17 +452,23 @@ def _extract_career(text: str) -> list[CareerEntry]:
         )[0].strip()
 
     progress_note = None
-    progress_match = re.search(r"(?:fixed|finished|drafted|wrote|advanced|completed)\s+([^.;]+)", text, flags=re.I)
+    progress_match = re.search(
+        r"(?:fixed|finished|drafted|wrote|advanced|completed)\s+([^.;]+)", text, flags=re.I
+    )
     if progress_match:
         progress_note = _capitalize_sentence(progress_match.group(0).strip())
 
+    duration_hours = float(duration_match.group(1)) if duration_match else None
+    explicit_signals = sum(bool(value) for value in (duration_hours, project, progress_note))
     return [
         CareerEntry(
             project=project,
-            activity="writing/revision" if progress_note else ("deep work" if "deep work" in lower else "work"),
-            duration_hours=float(duration_match.group(1)) if duration_match else None,
+            activity="writing/revision"
+            if progress_note
+            else ("deep work" if "deep work" in lower else "work"),
+            duration_hours=duration_hours,
             progress_note=progress_note,
-            confidence=0.72 if duration_match else 0.55,
+            confidence=_confidence(0.45, explicit_signals),
         )
     ]
 
@@ -401,7 +487,9 @@ def _extract_journal(
         journal_text = _capitalize_sentence(mood_match.group(1).strip())
     elif lower.startswith("journal:"):
         journal_text = text.removeprefix("journal:").strip()
-    elif any(marker in lower for marker in ("felt ", "thinking about", "grateful", "mentally drained")):
+    elif any(
+        marker in lower for marker in ("felt ", "thinking about", "grateful", "mentally drained")
+    ):
         journal_text = text
     elif not any((wellbeing, nutrition, workout, career)):
         journal_text = text
@@ -445,7 +533,10 @@ def _clarification_questions(
 def _is_cardio_workout(workout_type: str | None) -> bool:
     if not workout_type:
         return False
-    return any(marker in workout_type.lower() for marker in ("run", "running", "cardio", "bike", "cycling", "swim"))
+    return any(
+        marker in workout_type.lower()
+        for marker in ("run", "running", "cardio", "bike", "cycling", "swim")
+    )
 
 
 def _extract_between(text: str, start_patterns: tuple[str, ...], end_pattern: str) -> str | None:

@@ -40,10 +40,19 @@ def is_delete_request(text: str) -> bool:
     return bool(_DELETE_PREFIX.match(text))
 
 
-def handle_delete_request(db: LifeDatabase, text: str, entry_date: date | None = None) -> DeleteResult:
+def handle_delete_request(
+    db: LifeDatabase, text: str, entry_date: date | None = None
+) -> DeleteResult:
     stripped = text.strip()
     lowered = stripped.lower()
-    if lowered in {"/delete", "delete", "delete logs", "delete log", "remove logs", "show delete options"}:
+    if lowered in {
+        "/delete",
+        "delete",
+        "delete logs",
+        "delete log",
+        "remove logs",
+        "show delete options",
+    }:
         return DeleteResult(
             ok=True,
             status="delete_options_sent",
