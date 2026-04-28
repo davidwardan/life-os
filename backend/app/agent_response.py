@@ -50,9 +50,18 @@ def build_agent_reply(message: AgentMessageIn, result: WorkflowResult) -> AgentR
     )
 
 
+import re
+
+
 def apply_tone(text: str | None, tone: str) -> str | None:
     if text is None:
         return None
     if tone == "terse":
-        return text.splitlines()[0]
+        # Extract the first line, but strip MarkdownV2 formatting for a clean summary
+        # unless it's a simple bold header.
+        first_line = text.splitlines()[0]
+        # Remove emojis and specific markdown for the terse version to keep it "minimal"
+        clean = re.sub(r"[✅🧠✨🏃📖❓⚠️] ", "", first_line)
+        clean = clean.replace("*", "").replace("`", "").replace("\\", "")
+        return clean
     return text

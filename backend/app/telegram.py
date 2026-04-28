@@ -15,7 +15,7 @@ from backend.app.db import LifeDatabase
 from backend.app.llm_extraction import ExtractionService
 from backend.app.memory import MemoryService
 from backend.app.plotting import PlotService
-from backend.app.workflow import AgentWorkflow
+from backend.app.workflow import AgentWorkflow, escape_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class TelegramBotClient:
                 json={
                     "chat_id": chat_id,
                     "text": text,
+                    "parse_mode": "MarkdownV2",
                     "disable_web_page_preview": True,
                 },
             )
@@ -47,7 +48,11 @@ class TelegramBotClient:
             with open(photo_path, "rb") as photo:
                 response = await client.post(
                     f"https://api.telegram.org/bot{self.token}/sendPhoto",
-                    data={"chat_id": chat_id, "caption": caption},
+                    data={
+                        "chat_id": chat_id,
+                        "caption": caption,
+                        "parse_mode": "MarkdownV2",
+                    },
                     files={"photo": photo},
                 )
             response.raise_for_status()
@@ -139,10 +144,11 @@ class TelegramService:
         result = await self.workflow.process_text(text, source="telegram", entry_date=entry_date)
         if self.client and self.send_confirmations:
             for plot in result.plot_results:
+                caption = f"{plot.title} ({plot.detail})"
                 await self.client.send_photo(
                     chat_id,
                     str(plot.path),
-                    f"{plot.title} ({plot.detail})",
+                    escape_markdown(caption),
                 )
             if result.confirmation and (not result.plot_results or len(result.plot_results) > 1):
                 await self.client.send_message(chat_id, result.confirmation)
