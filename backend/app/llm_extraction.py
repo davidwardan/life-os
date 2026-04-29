@@ -87,14 +87,18 @@ class OpenRouterClient:
     def __init__(
         self,
         api_key: str,
-        model: str = settings.openrouter_model,
-        fallback_models: tuple[str, ...] = settings.openrouter_fallback_models,
+        model: str = settings.openrouter_extraction_model,
+        fallback_models: tuple[str, ...] = settings.openrouter_extraction_fallback_models,
+        chat_model: str = settings.openrouter_chat_model,
+        chat_fallback_models: tuple[str, ...] = settings.openrouter_chat_fallback_models,
         base_url: str = settings.openrouter_base_url,
         timeout_seconds: float = settings.llm_timeout_seconds,
     ):
         self.api_key = api_key
         self.model = model
         self.fallback_models = fallback_models
+        self.chat_model = chat_model
+        self.chat_fallback_models = chat_fallback_models
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
@@ -172,8 +176,20 @@ class OpenRouterClient:
         return _decode_response_json(response.json())
 
     async def chat(self, text: str, context: dict[str, Any] | None = None) -> str:
+        errors: list[str] = []
+        for model in (self.chat_model, *self.chat_fallback_models):
+            try:
+                return await self._chat_with_model(model, text, context)
+            except (asyncio.TimeoutError, httpx.HTTPError, KeyError, ValueError) as error:
+                errors.append(f"{model}: {_format_error(error)}")
+
+        raise ValueError("; ".join(errors))
+
+    async def _chat_with_model(
+        self, model: str, text: str, context: dict[str, Any] | None = None
+    ) -> str:
         payload = {
-            "model": self.model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": CHAT_SYSTEM_PROMPT},
                 {

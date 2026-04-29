@@ -86,12 +86,28 @@ Result: {{
 
 
 class PlottingAgent:
-    def __init__(self, api_key: str):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = settings.openrouter_plotting_model,
+        fallback_models: tuple[str, ...] = settings.openrouter_plotting_fallback_models,
+    ):
         self.api_key = api_key
+        self.model = model
+        self.fallback_models = fallback_models
 
     async def plan(self, text: str) -> PlotConfiguration:
+        errors: list[str] = []
+        for model in (self.model, *self.fallback_models):
+            try:
+                return await self._plan_with_model(model, text)
+            except (httpx.HTTPError, ValueError) as error:
+                errors.append(f"{model}: {_format_error(error)}")
+        raise ValueError("; ".join(errors))
+
+    async def _plan_with_model(self, model: str, text: str) -> PlotConfiguration:
         payload = {
-            "model": settings.openrouter_model,
+            "model": model,
             "messages": [
                 {"role": "system", "content": PLOTTING_SYSTEM_PROMPT},
                 {"role": "user", "content": text},
@@ -113,8 +129,19 @@ class PlottingAgent:
             return PlotConfiguration.model_validate_json(data)
 
     async def generate_insight(self, prompt: str, data: list[dict[str, Any]]) -> str:
+        errors: list[str] = []
+        for model in (self.model, *self.fallback_models):
+            try:
+                return await self._generate_insight_with_model(model, prompt, data)
+            except (httpx.HTTPError, KeyError, ValueError) as error:
+                errors.append(f"{model}: {_format_error(error)}")
+        raise ValueError("; ".join(errors))
+
+    async def _generate_insight_with_model(
+        self, model: str, prompt: str, data: list[dict[str, Any]]
+    ) -> str:
         payload = {
-            "model": settings.openrouter_model,
+            "model": model,
             "messages": [
                 {
                     "role": "system",
@@ -855,3 +882,8 @@ def _save(fig, path: Path) -> None:
 
 def _start_date(days: int) -> str:
     return (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
+
+
+def _format_error(error: Exception) -> str:
+    message = str(error).strip()
+    return message or error.__class__.__name__

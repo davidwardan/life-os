@@ -74,7 +74,7 @@ def extraction_status() -> ExtractionStatus:
         model=(
             settings.langextract_model
             if settings.extractor == "langextract" or settings.langextract_enabled
-            else settings.openrouter_model
+            else settings.openrouter_extraction_model
             if settings.extractor in {"llm", "auto"}
             else None
         ),
