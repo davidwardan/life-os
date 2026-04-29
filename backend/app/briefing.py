@@ -55,8 +55,8 @@ class OpenRouterBriefingClient:
     def __init__(
         self,
         api_key: str,
-        model: str = settings.openrouter_model,
-        fallback_models: tuple[str, ...] = settings.openrouter_fallback_models,
+        model: str = settings.openrouter_briefing_model,
+        fallback_models: tuple[str, ...] = settings.openrouter_briefing_fallback_models,
         base_url: str = settings.openrouter_base_url,
         timeout_seconds: float = settings.llm_timeout_seconds,
     ):

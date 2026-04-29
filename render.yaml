@@ -22,11 +22,31 @@ services:
       - key: LIFE_OS_LLM_TIMEOUT_SECONDS
         value: "60"
       - key: OPENROUTER_MODEL
-        value: nvidia/nemotron-3-super-120b-a12b:free
+        value: qwen/qwen3-next-80b-a3b-instruct:free
       - key: LIFE_OS_LANGEXTRACT_MODEL
-        value: nvidia/nemotron-3-super-120b-a12b:free
+        value: qwen/qwen3-next-80b-a3b-instruct:free
       - key: OPENROUTER_FALLBACK_MODELS
-        value: nvidia/nemotron-3-nano-30b-a3b:free
+        value: nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-nano-9b-v2:free
+      - key: OPENROUTER_EXTRACTION_MODEL
+        value: qwen/qwen3-next-80b-a3b-instruct:free
+      - key: OPENROUTER_EXTRACTION_FALLBACK_MODELS
+        value: nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-nano-9b-v2:free
+      - key: OPENROUTER_PLANNER_MODEL
+        value: nvidia/nemotron-nano-9b-v2:free
+      - key: OPENROUTER_PLANNER_FALLBACK_MODELS
+        value: qwen/qwen3-next-80b-a3b-instruct:free,nvidia/nemotron-3-super-120b-a12b:free
+      - key: OPENROUTER_CHAT_MODEL
+        value: qwen/qwen3-next-80b-a3b-instruct:free
+      - key: OPENROUTER_CHAT_FALLBACK_MODELS
+        value: nvidia/nemotron-nano-9b-v2:free,nvidia/nemotron-3-super-120b-a12b:free
+      - key: OPENROUTER_BRIEFING_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b:free
+      - key: OPENROUTER_BRIEFING_FALLBACK_MODELS
+        value: qwen/qwen3-next-80b-a3b-instruct:free,nvidia/nemotron-nano-9b-v2:free
+      - key: OPENROUTER_PLOTTING_MODEL
+        value: qwen/qwen3-next-80b-a3b-instruct:free
+      - key: OPENROUTER_PLOTTING_FALLBACK_MODELS
+        value: nvidia/nemotron-nano-9b-v2:free,nvidia/nemotron-3-super-120b-a12b:free
       - key: TELEGRAM_SEND_CONFIRMATIONS
         value: "true"
       - key: GOOGLE_CALENDAR_IDS

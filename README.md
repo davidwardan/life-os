@@ -107,11 +107,21 @@ LIFE_OS_WEB_USERNAME=life-os
 LIFE_OS_WEB_PASSWORD=
 LIFE_OS_REQUIRE_WEB_AUTH=false
 LIFE_OS_ENABLE_LANGEXTRACT=false
-LIFE_OS_LANGEXTRACT_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+LIFE_OS_LANGEXTRACT_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
 
 OPENROUTER_API_KEY=
-OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
-OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-nano-30b-a3b:free
+OPENROUTER_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
+OPENROUTER_FALLBACK_MODELS=nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-nano-9b-v2:free
+OPENROUTER_EXTRACTION_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
+OPENROUTER_EXTRACTION_FALLBACK_MODELS=nvidia/nemotron-3-super-120b-a12b:free,nvidia/nemotron-nano-9b-v2:free
+OPENROUTER_PLANNER_MODEL=nvidia/nemotron-nano-9b-v2:free
+OPENROUTER_PLANNER_FALLBACK_MODELS=qwen/qwen3-next-80b-a3b-instruct:free,nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_CHAT_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
+OPENROUTER_CHAT_FALLBACK_MODELS=nvidia/nemotron-nano-9b-v2:free,nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_BRIEFING_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+OPENROUTER_BRIEFING_FALLBACK_MODELS=qwen/qwen3-next-80b-a3b-instruct:free,nvidia/nemotron-nano-9b-v2:free
+OPENROUTER_PLOTTING_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
+OPENROUTER_PLOTTING_FALLBACK_MODELS=nvidia/nemotron-nano-9b-v2:free,nvidia/nemotron-3-super-120b-a12b:free
 LIFE_OS_LLM_TIMEOUT_SECONDS=60
 
 TELEGRAM_BOT_TOKEN=
