@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -10,30 +9,25 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+import plotly.graph_objects as go
 from pydantic import BaseModel, Field
 
 from backend.app._db_schema import SCHEMA
 from backend.app.config import DATA_DIR, settings
 
-os.environ.setdefault("MPLCONFIGDIR", str(DATA_DIR / "matplotlib"))
-os.environ.setdefault("XDG_CACHE_HOME", str(DATA_DIR / "cache"))
-
-import matplotlib
-
-matplotlib.use("Agg")
-from matplotlib import pyplot as plt
-from matplotlib.colors import ListedColormap
-from matplotlib.ticker import MaxNLocator
-
 from backend.app.db import LifeDatabase
 
 
 PLOTS_DIR = DATA_DIR / "plots"
-INK = "#111111"
-PAPER = "#f7f7f4"
-MUTED = "#74746e"
-GRID = "#d8d8d2"
-RED = "#d9291c"
+WHITE = "#ffffff"
+BLACK = "#111111"
+BLUE = "#1d4ed8"
+BLUE_SOFT = "#dbeafe"
+RED = "#dc2626"
+GREEN = "#16a34a"
+RGB_PALETTE = (BLUE, GREEN, RED)
+IMAGE_WIDTH = 1530
+IMAGE_HEIGHT = 867
 
 
 @dataclass(frozen=True)
@@ -317,13 +311,12 @@ class PlotService:
         if not rows:
             # Generate empty plot with legacy style
             path = self._path("empty")
-            fig, ax = _figure()
-            _style_axis(ax, config.title, config.ylabel, [], kicker=config.kicker)
+            fig = _base_figure(config.title, config.ylabel, [], kicker=config.kicker)
             _save(fig, path)
             return PlotResult(path=path, title=config.title, detail="No data found")
 
         path = self._path(_slug(config.title))
-        fig, ax = _figure()
+        fig = _base_figure(config.title, config.ylabel, rows, kicker=config.kicker)
 
         # Determine X values (date or label)
         x_key = "date" if "date" in rows[0] else ("label" if "label" in rows[0] else None)
@@ -332,27 +325,16 @@ class PlotService:
             x_key = list(rows[0].keys())[0]
 
         x_labels = [str(row[x_key]) for row in rows]
-        x_values = list(range(len(rows)))
 
         if config.chart_type == "line":
-            colors = [INK, RED, MUTED, "#444", "#888"]
             for i, series_key in enumerate(config.series):
                 if series_key not in rows[0]:
                     continue
                 values = [row[series_key] for row in rows]
-                color = colors[i % len(colors)]
-                ax.plot(
-                    x_values,
-                    values,
-                    marker="o",
-                    markersize=6,
-                    linewidth=2.4,
-                    color=color,
-                    label=series_key.replace("_", " "),
-                )
-                _annotate_last(ax, x_values, values, series_key.replace("_", " "), color)
-            if len(config.series) > 1:
-                ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+                color = _series_color(series_key, i)
+                label = series_key.replace("_", " ")
+                _add_line(fig, x_labels, values, label, color)
+                _annotate_last(fig, x_labels, values, label, color)
         elif config.chart_type == "bar":
             series_key = (
                 config.series[0]
@@ -360,20 +342,13 @@ class PlotService:
                 else list(rows[0].keys())[1]
             )
             values = [row[series_key] for row in rows]
-            bars = ax.bar(x_values, values, color=INK, width=0.6)
-            if bars:
-                bars[-1].set_color(RED)
-                _annotate_last(ax, x_values, values, "latest", RED)
+            _add_bar(fig, x_labels, values, _bar_colors(config.title, series_key, len(values)))
+            _annotate_last(fig, x_labels, values, "latest", GREEN)
+            _annotate_peak(fig, x_labels, values)
         elif config.chart_type == "heatmap":
             categories = [c for c in rows[0].keys() if c != x_key]
             matrix = [[int(row[cat]) for row in rows] for cat in categories]
-            ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
-            ax.set_yticks(list(range(len(categories))))
-            ax.set_yticklabels([c.title() for c in categories])
-            ax.grid(False)
-
-        _style_axis(ax, config.title, config.ylabel, rows, kicker=config.kicker)
-        _set_date_ticks(ax, x_values, x_labels)
+            _add_heatmap(fig, x_labels, [c.title() for c in categories], matrix)
 
         # Generate insight
         try:
@@ -424,24 +399,16 @@ class PlotService:
             (_start_date(days),),
         )
         path = self._path("energy_stress")
-        fig, ax = _figure()
         dates = [row["date"] for row in rows]
-        x_values = list(range(len(dates)))
+        fig = _base_figure("Energy / Stress", "Score", rows, kicker=f"Last {days} days")
         if rows:
             energy = [row["energy"] for row in rows]
             stress = [row["stress"] for row in rows]
-            ax.plot(
-                x_values, energy, marker="o", markersize=7, linewidth=2.6, color=INK, label="Energy"
-            )
-            ax.plot(
-                x_values, stress, marker="o", markersize=7, linewidth=2.6, color=RED, label="Stress"
-            )
-            _annotate_last(ax, x_values, energy, "energy", INK)
-            _annotate_last(ax, x_values, stress, "stress", RED)
-        _style_axis(ax, "Energy / Stress", "Score", rows, kicker=f"Last {days} days")
-        _set_date_ticks(ax, x_values, dates)
-        ax.set_ylim(0, 10)
-        ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+            _add_line(fig, dates, energy, "Energy", GREEN)
+            _add_line(fig, dates, stress, "Stress", RED)
+            _annotate_last(fig, dates, energy, "energy", GREEN)
+            _annotate_last(fig, dates, stress, "stress", RED)
+        fig.update_yaxes(range=[0, 10])
         _save(fig, path)
         return PlotResult(path=path, title="Energy and stress", detail=f"{len(rows)} day(s)")
 
@@ -621,31 +588,14 @@ class PlotService:
             tuple(_start_date(days) for _ in range(5)),
         )
         path = self._path("data_completeness")
-        fig, ax = _figure()
         categories = ["wellbeing", "nutrition", "workout", "career", "journal"]
         dates = [row["date"] for row in rows]
+        fig = _base_figure(
+            "Data Completeness", "", rows, kicker=f"Last {days} days", integer_y=False
+        )
         if rows:
             matrix = [[int(row[category]) for row in rows] for category in categories]
-            ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
-            ax.set_yticks(list(range(len(categories))))
-            ax.set_yticklabels([category.title() for category in categories])
-            ax.set_xticks(list(range(len(dates))))
-            ax.set_xticklabels(dates, rotation=35, ha="right")
-            for y, values in enumerate(matrix):
-                for x, value in enumerate(values):
-                    if value:
-                        ax.text(
-                            x,
-                            y,
-                            "x",
-                            ha="center",
-                            va="center",
-                            color=PAPER,
-                            fontsize=8,
-                            fontweight="bold",
-                        )
-        _style_axis(ax, "Data Completeness", "", rows, kicker=f"Last {days} days", integer_y=False)
-        ax.grid(False)
+            _add_heatmap(fig, dates, [category.title() for category in categories], matrix)
         _save(fig, path)
         return PlotResult(path=path, title="Data completeness", detail=f"{len(rows)} day(s)")
 
@@ -662,35 +612,17 @@ class PlotService:
         days: int,
     ) -> PlotResult:
         path = self._path(filename)
-        fig, ax = _figure()
         dates = [row["date"] for row in rows]
-        x_values = list(range(len(dates)))
+        fig = _base_figure(title, ylabel, rows, kicker=f"Last {days} days")
         if rows:
             left_values = [row[left_key] for row in rows]
             right_values = [row[right_key] for row in rows]
-            ax.plot(
-                x_values,
-                left_values,
-                marker="o",
-                markersize=7,
-                linewidth=2.6,
-                color=INK,
-                label=left_label,
-            )
-            ax.plot(
-                x_values,
-                right_values,
-                marker="o",
-                markersize=7,
-                linewidth=2.6,
-                color=RED,
-                label=right_label,
-            )
-            _annotate_last(ax, x_values, left_values, left_label, INK)
-            _annotate_last(ax, x_values, right_values, right_label, RED)
-        _style_axis(ax, title, ylabel, rows, kicker=f"Last {days} days")
-        _set_date_ticks(ax, x_values, dates)
-        ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+            left_color = _series_color(left_label, 0)
+            right_color = _series_color(right_label, 1)
+            _add_line(fig, dates, left_values, left_label, left_color)
+            _add_line(fig, dates, right_values, right_label, right_color)
+            _annotate_last(fig, dates, left_values, left_label, left_color)
+            _annotate_last(fig, dates, right_values, right_label, right_color)
         _save(fig, path)
         return PlotResult(path=path, title=title, detail=f"{len(rows)} day(s)")
 
@@ -703,20 +635,16 @@ class PlotService:
         filename: str,
     ) -> PlotResult:
         path = self._path(filename)
-        fig, ax = _figure()
         if rows and "label" in rows[0].keys():
             dates = [row["label"] for row in rows]
         else:
             dates = [row["date"] for row in rows]
-        x_values = list(range(len(dates)))
         values = [row[value_key] for row in rows]
+        fig = _base_figure(title, ylabel, rows, kicker="Life OS")
         if rows:
-            bars = ax.bar(x_values, values, color=INK, width=0.58)
-            if bars:
-                bars[-1].set_color(RED)
-                _annotate_last(ax, x_values, values, "latest", RED)
-        _style_axis(ax, title, ylabel, rows, kicker="Life OS")
-        _set_date_ticks(ax, x_values, dates)
+            _add_bar(fig, dates, values, _bar_colors(title, value_key, len(values)))
+            _annotate_last(fig, dates, values, "latest", GREEN)
+            _annotate_peak(fig, dates, values)
         _save(fig, path)
         return PlotResult(path=path, title=title, detail=f"{len(rows)} day(s)")
 
@@ -735,12 +663,6 @@ class PlotService:
     def _path(self, name: str) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
         return self.plots_dir / f"{name}_{stamp}.png"
-
-
-def _figure():
-    fig, ax = plt.subplots(figsize=(8.5, 4.8), facecolor=PAPER)
-    ax.set_facecolor(PAPER)
-    return fig, ax
 
 
 def supported_plots() -> list[dict[str, Any]]:
@@ -792,92 +714,183 @@ def _slug(value: str) -> str:
     return "_".join(part for part in value.lower().replace("-", " ").split() if part)
 
 
-def _completion_cmap() -> ListedColormap:
-    return ListedColormap([PAPER, INK])
+def _series_color(label: str, index: int) -> str:
+    lower = label.lower()
+    if any(word in lower for word in ("stress", "risk", "overdue", "missed", "calorie")):
+        return RED
+    if any(word in lower for word in ("energy", "protein", "mood", "complete", "consistency")):
+        return GREEN
+    if any(word in lower for word in ("sleep", "training", "workout", "duration", "career")):
+        return BLUE
+    return RGB_PALETTE[index % len(RGB_PALETTE)]
 
 
-def _style_axis(
-    ax,
+def _bar_colors(title: str, value_key: str, count: int) -> list[str]:
+    base = _series_color(f"{title} {value_key}", 0)
+    colors = [base for _ in range(count)]
+    if colors:
+        colors[-1] = GREEN
+    return colors
+
+
+def _base_figure(
     title: str,
     ylabel: str,
-    rows: list[sqlite3.Row],
+    rows: list[dict[str, Any]],
     kicker: str,
     integer_y: bool = True,
-) -> None:
-    ax.text(
-        0,
-        1.14,
-        kicker.upper(),
-        transform=ax.transAxes,
-        color=RED,
-        fontsize=9,
-        fontweight="bold",
+) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        width=IMAGE_WIDTH,
+        height=IMAGE_HEIGHT,
+        paper_bgcolor=WHITE,
+        plot_bgcolor=WHITE,
+        margin={"l": 78, "r": 54, "t": 132, "b": 105},
+        font={"family": "Arial, sans-serif", "color": BLACK, "size": 16},
+        title={
+            "text": f"<span style='font-size:15px;color:{GREEN}'>{kicker.upper()}</span>"
+            f"<br><span style='font-size:44px;color:{BLACK}'>{title}</span>",
+            "x": 0.01,
+            "xanchor": "left",
+            "y": 0.96,
+            "yanchor": "top",
+        },
+        legend={
+            "orientation": "h",
+            "x": 0.0,
+            "y": 1.04,
+            "xanchor": "left",
+            "yanchor": "bottom",
+            "font": {"color": BLACK, "size": 18},
+        },
+        hovermode=False,
     )
-    ax.text(
-        0,
-        1.06,
-        title,
-        transform=ax.transAxes,
-        color=INK,
-        fontsize=22,
-        fontweight="bold",
+    fig.update_xaxes(
+        showline=True,
+        linecolor=BLACK,
+        linewidth=1.4,
+        tickfont={"color": BLACK, "size": 15},
+        tickangle=-35,
+        showgrid=False,
+        automargin=True,
     )
-    ax.set_ylabel(ylabel, color=MUTED)
-    ax.set_xlabel("")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["left"].set_color(INK)
-    ax.spines["bottom"].set_color(INK)
-    ax.grid(axis="y", color=GRID, linewidth=0.8)
-    ax.set_axisbelow(True)
-    ax.tick_params(axis="both", colors=INK, labelsize=9)
-    if integer_y:
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True, nbins=5))
+    fig.update_yaxes(
+        title={"text": ylabel, "font": {"color": BLACK, "size": 18}},
+        showline=True,
+        linecolor=BLACK,
+        linewidth=1.4,
+        gridcolor=BLUE_SOFT,
+        griddash="solid",
+        tickfont={"color": BLACK, "size": 15},
+        automargin=True,
+        dtick=1 if integer_y else None,
+    )
     if not rows:
-        ax.text(
-            0.5,
-            0.5,
-            "No data yet",
-            ha="center",
-            va="center",
-            transform=ax.transAxes,
-            color=MUTED,
-            fontsize=14,
-            fontweight="bold",
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="No data yet",
+            showarrow=False,
+            font={"color": BLACK, "size": 22},
         )
-        ax.set_xticks([])
-    else:
-        ax.tick_params(axis="x", labelrotation=35)
+    return fig
 
 
-def _set_date_ticks(ax, x_values: list[int], dates: list[str]) -> None:
-    if not x_values:
-        return
-    ax.set_xticks(x_values)
-    ax.set_xticklabels(dates, rotation=35, ha="right")
-    ax.margins(x=0.04)
+def _add_line(
+    fig: go.Figure, x_values: list[str], values: list[float | None], label: str, color: str
+) -> None:
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=values,
+            mode="lines+markers",
+            name=label,
+            line={"color": color, "width": 4},
+            marker={"color": color, "size": 12, "line": {"color": WHITE, "width": 1.5}},
+            connectgaps=False,
+        )
+    )
+
+
+def _add_bar(fig: go.Figure, x_values: list[str], values: list[float | None], colors: list[str]):
+    fig.add_trace(
+        go.Bar(
+            x=x_values,
+            y=values,
+            marker={"color": colors, "line": {"color": BLUE, "width": 1}},
+            width=0.62,
+            showlegend=False,
+        )
+    )
+
+
+def _add_heatmap(
+    fig: go.Figure, x_values: list[str], y_values: list[str], matrix: list[list[int]]
+) -> None:
+    fig.add_trace(
+        go.Heatmap(
+            x=x_values,
+            y=y_values,
+            z=matrix,
+            colorscale=[[0, WHITE], [1, GREEN]],
+            showscale=False,
+            xgap=4,
+            ygap=4,
+            hoverinfo="skip",
+        )
+    )
+    fig.update_yaxes(autorange="reversed", dtick=None, gridcolor=WHITE)
+    fig.update_xaxes(showgrid=False)
 
 
 def _annotate_last(
-    ax, x_values: list[int], values: list[float | None], label: str, color: str
+    fig: go.Figure, x_values: list[str], values: list[float | None], label: str, color: str
 ) -> None:
     if not x_values or not values or values[-1] is None:
         return
-    ax.annotate(
-        f"{label}: {values[-1]:g}",
-        xy=(x_values[-1], values[-1]),
-        xytext=(8, 8),
-        textcoords="offset points",
-        color=color,
-        fontsize=9,
-        fontweight="bold",
+    fig.add_annotation(
+        x=x_values[-1],
+        y=values[-1],
+        text=f"{label}: {values[-1]:g}",
+        showarrow=True,
+        arrowhead=1,
+        arrowcolor=color,
+        ax=26,
+        ay=-22,
+        bgcolor=WHITE,
+        bordercolor=color,
+        borderwidth=2,
+        borderpad=4,
+        font={"color": color, "size": 16},
+    )
+
+
+def _annotate_peak(fig: go.Figure, x_values: list[str], values: list[float | None]) -> None:
+    valid = [(x, value) for x, value in zip(x_values, values) if value is not None]
+    if len(valid) < 3:
+        return
+    peak_x, peak_value = max(valid, key=lambda item: item[1])
+    if peak_x == x_values[-1]:
+        return
+    fig.add_annotation(
+        x=peak_x,
+        y=peak_value,
+        text=f"peak: {peak_value:g}",
+        showarrow=False,
+        yshift=18,
+        bgcolor=WHITE,
+        bordercolor=BLUE,
+        borderwidth=1.5,
+        borderpad=4,
+        font={"color": BLUE, "size": 14},
     )
 
 
 def _save(fig, path: Path) -> None:
-    fig.tight_layout()
-    fig.savefig(path, dpi=170, facecolor=PAPER, edgecolor=PAPER)
-    plt.close(fig)
+    fig.write_image(str(path), format="png", width=IMAGE_WIDTH, height=IMAGE_HEIGHT, scale=1)
 
 
 def _start_date(days: int) -> str:
