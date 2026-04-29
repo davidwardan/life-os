@@ -2,12 +2,15 @@ from datetime import date, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
 from backend.app.db import LifeDatabase
 from backend.app.extraction import extract_daily_log
 from backend.app.plotting import (
     PlotRequest,
     PlotService,
+    WHITE,
+    _base_figure,
     parse_plot_request,
     parse_plot_requests,
     supported_plots,
@@ -76,11 +79,18 @@ class PlottingTests(TestCase):
             )
             plotter = PlotService(db, plots_dir=Path(directory) / "plots")
 
-            result = plotter.generate(PlotRequest(metric="energy", days=30))
+            with patch("backend.app.plotting._save", new=_fake_save):
+                result = plotter.generate(PlotRequest(metric="energy", days=30))
 
             self.assertTrue(result.path.exists())
             self.assertEqual(result.path.suffix, ".png")
             self.assertGreater(result.path.stat().st_size, 0)
+
+    def test_plot_canvas_is_white(self) -> None:
+        figure = _base_figure("Energy", "Score", [{"date": "2026-04-25"}], kicker="Life OS")
+
+        self.assertEqual(figure.layout.paper_bgcolor, WHITE)
+        self.assertEqual(figure.layout.plot_bgcolor, WHITE)
 
     def test_generates_all_supported_phase_four_plots(self) -> None:
         with TemporaryDirectory() as directory:
@@ -104,11 +114,12 @@ class PlottingTests(TestCase):
                 PlotRequest(metric="data_completeness"),
             ]
 
-            for request in requests:
-                result = plotter.generate(request)
+            with patch("backend.app.plotting._save", new=_fake_save):
+                for request in requests:
+                    result = plotter.generate(request)
 
-                self.assertTrue(result.path.exists(), request.metric)
-                self.assertGreater(result.path.stat().st_size, 0, request.metric)
+                    self.assertTrue(result.path.exists(), request.metric)
+                    self.assertGreater(result.path.stat().st_size, 0, request.metric)
 
     def test_supported_plot_catalog_is_available(self) -> None:
         metrics = {plot["metric"] for plot in supported_plots()}
@@ -165,3 +176,7 @@ def _seed_plot_data(db: LifeDatabase) -> None:
             MessageIn(text=f"seed plot data {offset}", entry_date=entry_date, source="api"),
             parsed,
         )
+
+
+def _fake_save(_figure: object, path: Path) -> None:
+    path.write_bytes(b"plotly-png-export")
