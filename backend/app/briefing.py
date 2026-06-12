@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from typing import Any, Protocol
@@ -10,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from backend.app._db_utils import rows_as_dicts
+from backend.app._llm_utils import format_error as _format_error
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 from backend.app.memory import MemoryService
@@ -411,15 +412,7 @@ class BriefingService:
 
     def _rows(self, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
         with self.db.connect() as connection:
-            cursor = connection.execute(query, params)
-            rows = cursor.fetchall()
-            if not rows:
-                return []
-            if isinstance(rows[0], sqlite3.Row):
-                return [dict(row) for row in rows]
-
-            columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
+            return rows_as_dicts(connection, query, params)
 
 
 def is_briefing_request(text: str) -> bool:
@@ -616,13 +609,6 @@ def _decode_text(payload: dict[str, Any]) -> str:
     raise ValueError("Could not find briefing text in LLM response")
 
 
-def _format_error(error: Exception) -> str:
-    if isinstance(error, asyncio.TimeoutError):
-        return f"OpenRouter request exceeded {settings.llm_timeout_seconds:g}s timeout"
-    message = str(error).strip()
-    return message or error.__class__.__name__
-
-
 def _avg(values) -> float | None:
     clean = [float(value) for value in values if value is not None]
     if not clean:
@@ -672,8 +658,13 @@ def _event_occurs_on(row: dict[str, Any], target_date: date) -> bool:
     iso_date = target_date.isoformat()
     if row.get("all_day"):
         start = row.get("start_date")
-        end = row.get("end_date") or start
-        return bool(start and start <= iso_date and iso_date < end)
+        if not start:
+            return False
+        end = row.get("end_date")
+        if end and end > start:
+            # Google all-day end dates are exclusive (day after the last day).
+            return start <= iso_date < end
+        return iso_date == start
     return _date_prefix(row.get("start_at")) == iso_date
 
 

@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from backend.app._llm_utils import format_error as _format_error
 from backend.app.config import settings
 from backend.app.db import LifeDatabase
 
@@ -242,12 +243,14 @@ class ExternalSyncService:
 
     def replace_todoist_tasks(self, tasks: list[dict[str, Any]]) -> int:
         now = _now()
+        inserted = 0
         with self.db.connect() as connection:
             connection.execute("DELETE FROM todoist_tasks")
             for task in tasks:
                 row = _normalize_todoist_task(task, now)
                 if row is None:
                     continue
+                inserted += 1
                 connection.execute(
                     """
                     INSERT INTO todoist_tasks
@@ -275,7 +278,7 @@ class ExternalSyncService:
                         row["synced_at"],
                     ),
                 )
-        return len([task for task in tasks if task.get("id") and task.get("content")])
+        return inserted
 
     def replace_calendar_events(
         self,
@@ -448,11 +451,6 @@ def _as_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _format_error(error: Exception) -> str:
-    message = str(error).strip()
-    return message or error.__class__.__name__
 
 
 def _now() -> str:

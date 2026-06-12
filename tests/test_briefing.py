@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import IsolatedAsyncioTestCase, TestCase
 
-from backend.app.briefing import BriefingService, is_briefing_request
+from backend.app.briefing import BriefingService, _event_occurs_on, is_briefing_request
 from backend.app.db import LifeDatabase
 from backend.app.memory import MemoryService
 from backend.app.schemas import (
@@ -56,6 +56,24 @@ class BriefingRequestTests(TestCase):
         self.assertTrue(is_briefing_request("morning brief"))
         self.assertTrue(is_briefing_request("/brief"))
         self.assertFalse(is_briefing_request("briefly worked on the paper"))
+
+
+class CalendarEventMatchingTests(TestCase):
+    def test_single_day_all_day_event_without_end_date_matches(self) -> None:
+        event = {"all_day": 1, "start_date": "2026-04-25", "end_date": None}
+        self.assertTrue(_event_occurs_on(event, date(2026, 4, 25)))
+        self.assertFalse(_event_occurs_on(event, date(2026, 4, 26)))
+
+    def test_all_day_event_end_date_is_exclusive(self) -> None:
+        event = {"all_day": 1, "start_date": "2026-04-25", "end_date": "2026-04-27"}
+        self.assertTrue(_event_occurs_on(event, date(2026, 4, 25)))
+        self.assertTrue(_event_occurs_on(event, date(2026, 4, 26)))
+        self.assertFalse(_event_occurs_on(event, date(2026, 4, 27)))
+
+    def test_timed_event_matches_by_start_date(self) -> None:
+        event = {"all_day": 0, "start_at": "2026-04-25T09:00:00-04:00"}
+        self.assertTrue(_event_occurs_on(event, date(2026, 4, 25)))
+        self.assertFalse(_event_occurs_on(event, date(2026, 4, 26)))
 
 
 def _seed_briefing_data(db: LifeDatabase, end_date: date) -> None:

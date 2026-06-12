@@ -89,7 +89,7 @@ http://127.0.0.1:8000
 Run tests:
 
 ```bash
-python -m unittest discover -s tests
+python -m unittest discover -s tests -t .
 ```
 
 ## Deploy

@@ -129,6 +129,19 @@ class ExtractionTests(TestCase):
         self.assertTrue(parsed.nutrition[0].estimated)
         self.assertTrue(any("actual calories" in q.lower() for q in parsed.clarification_questions))
 
+    def test_keeps_all_meals_when_dinner_is_logged_with_earlier_meals(self) -> None:
+        parsed = extract_daily_log(
+            "Ate oatmeal with dates in the morning. "
+            "Lunch was chicken with rice. "
+            "Dinner was salmon and potatoes.",
+            date(2026, 4, 25),
+        )
+
+        meal_types = [entry.meal_type for entry in parsed.nutrition]
+        self.assertIn("breakfast", meal_types)
+        self.assertIn("lunch", meal_types)
+        self.assertIn("dinner", meal_types)
+
     def test_extracts_running_distance_pace_and_qualitative_wellbeing(self) -> None:
         parsed = extract_daily_log(
             "i ran for 5km with a pace of 5.5 yet i am destroyed "

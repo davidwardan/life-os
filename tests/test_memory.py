@@ -21,6 +21,15 @@ class MemoryExtractionTests(TestCase):
         self.assertEqual(by_category["strategy"].value, "training early")
         self.assertEqual(by_category["anti_strategy"].value, "long motivational messages")
 
+    def test_keeps_conditional_clauses_but_strips_rationale(self) -> None:
+        conditional = extract_memory_candidates("Remember that I like morning runs unless it rains")
+        self.assertEqual(conditional[0].value, "morning runs unless it rains")
+
+        rationale = extract_memory_candidates(
+            "Remember that I like short briefings because I read them on the go"
+        )
+        self.assertEqual(rationale[0].value, "short briefings")
+
     def test_detects_explicit_memory_requests(self) -> None:
         self.assertTrue(is_memory_request("remember that briefings should be blunt"))
         self.assertTrue(is_memory_request("note that morning workouts help"))

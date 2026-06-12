@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
+from backend.app._db_utils import rows_as_dicts as _rows
 from backend.app.schemas import ParsedDailyLog
 
 
@@ -168,14 +168,3 @@ def duplicate_journal(connection: Any, log_date: str, item: Any) -> bool:
 
 def _exists(connection: Any, query: str, params: tuple[Any, ...]) -> bool:
     return bool(_rows(connection, query, params))
-
-
-def _rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    cursor = connection.execute(query, params)
-    rows = cursor.fetchall()
-    if not rows:
-        return []
-    if isinstance(rows[0], sqlite3.Row):
-        return [dict(row) for row in rows]
-    columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]

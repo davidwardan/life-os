@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -13,6 +14,8 @@ import httpx
 from pydantic import BaseModel, Field
 
 from backend.app._db_schema import SCHEMA
+from backend.app._db_utils import rows_as_dicts
+from backend.app._llm_utils import format_error as _format_error
 from backend.app.config import DATA_DIR, settings
 
 os.environ.setdefault("MPLCONFIGDIR", str(DATA_DIR / "matplotlib"))
@@ -27,6 +30,8 @@ from matplotlib.ticker import MaxNLocator
 
 from backend.app.db import LifeDatabase
 
+
+logger = logging.getLogger(__name__)
 
 PLOTS_DIR = DATA_DIR / "plots"
 INK = "#111111"
@@ -56,6 +61,26 @@ class PlotConfiguration(BaseModel):
     insight_prompt: str = Field(
         description="A prompt to generate a 1-sentence insight from the fetched data."
     )
+
+
+_FORBIDDEN_SQL_KEYWORDS = re.compile(
+    r"\b(insert|update|delete|drop|alter|create|replace|attach|detach|pragma|vacuum|reindex)\b",
+    re.IGNORECASE,
+)
+
+
+def is_safe_plot_query(query: str) -> bool:
+    """Only a single read-only SELECT (or WITH...SELECT) statement is allowed.
+
+    The plot query comes from an LLM, so it is untrusted input even though it
+    runs against the local database.
+    """
+    stripped = query.strip().rstrip(";").strip()
+    if not stripped or ";" in stripped:
+        return False
+    if not re.match(r"(?:select|with)\b", stripped, flags=re.IGNORECASE):
+        return False
+    return not _FORBIDDEN_SQL_KEYWORDS.search(stripped)
 
 
 PLOTTING_SYSTEM_PROMPT = f"""
@@ -154,7 +179,7 @@ class PlottingAgent:
             ],
             "temperature": 0.3,
         }
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=settings.llm_timeout_seconds) as client:
             response = await client.post(
                 f"{settings.openrouter_base_url}/chat/completions",
                 headers={
@@ -308,9 +333,12 @@ class PlotService:
 
         try:
             config = await self.agent.plan(text)
+            if not is_safe_plot_query(config.query):
+                raise ValueError(f"Rejected unsafe plot query: {config.query!r}")
             rows = self._rows(config.query, ())
         except Exception:
             # Fallback on planner error
+            logger.exception("Smart plot planning failed; falling back to legacy parser")
             req = parse_plot_request(text)
             return self.generate(req) if req else self._energy_stress(30)
 
@@ -325,55 +353,61 @@ class PlotService:
         path = self._path(_slug(config.title))
         fig, ax = _figure()
 
-        # Determine X values (date or label)
-        x_key = "date" if "date" in rows[0] else ("label" if "label" in rows[0] else None)
-        if not x_key:
-            # Guess first column if no date/label
-            x_key = list(rows[0].keys())[0]
+        try:
+            # Determine X values (date or label)
+            x_key = "date" if "date" in rows[0] else ("label" if "label" in rows[0] else None)
+            if not x_key:
+                # Guess first column if no date/label
+                x_key = list(rows[0].keys())[0]
 
-        x_labels = [str(row[x_key]) for row in rows]
-        x_values = list(range(len(rows)))
+            x_labels = [str(row[x_key]) for row in rows]
+            x_values = list(range(len(rows)))
 
-        if config.chart_type == "line":
-            colors = [INK, RED, MUTED, "#444", "#888"]
-            for i, series_key in enumerate(config.series):
-                if series_key not in rows[0]:
-                    continue
-                values = [row[series_key] for row in rows]
-                color = colors[i % len(colors)]
-                ax.plot(
-                    x_values,
-                    values,
-                    marker="o",
-                    markersize=6,
-                    linewidth=2.4,
-                    color=color,
-                    label=series_key.replace("_", " "),
+            if config.chart_type == "line":
+                colors = [INK, RED, MUTED, "#444", "#888"]
+                for i, series_key in enumerate(config.series):
+                    if series_key not in rows[0]:
+                        continue
+                    values = [row[series_key] for row in rows]
+                    color = colors[i % len(colors)]
+                    ax.plot(
+                        x_values,
+                        values,
+                        marker="o",
+                        markersize=6,
+                        linewidth=2.4,
+                        color=color,
+                        label=series_key.replace("_", " "),
+                    )
+                    _annotate_last(ax, x_values, values, series_key.replace("_", " "), color)
+                if len(config.series) > 1:
+                    ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
+            elif config.chart_type == "bar":
+                series_key = (
+                    config.series[0]
+                    if config.series and config.series[0] in rows[0]
+                    else list(rows[0].keys())[1]
                 )
-                _annotate_last(ax, x_values, values, series_key.replace("_", " "), color)
-            if len(config.series) > 1:
-                ax.legend(loc="upper left", bbox_to_anchor=(0, 1.02), ncol=2, frameon=False)
-        elif config.chart_type == "bar":
-            series_key = (
-                config.series[0]
-                if config.series and config.series[0] in rows[0]
-                else list(rows[0].keys())[1]
-            )
-            values = [row[series_key] for row in rows]
-            bars = ax.bar(x_values, values, color=INK, width=0.6)
-            if bars:
-                bars[-1].set_color(RED)
-                _annotate_last(ax, x_values, values, "latest", RED)
-        elif config.chart_type == "heatmap":
-            categories = [c for c in rows[0].keys() if c != x_key]
-            matrix = [[int(row[cat]) for row in rows] for cat in categories]
-            ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
-            ax.set_yticks(list(range(len(categories))))
-            ax.set_yticklabels([c.title() for c in categories])
-            ax.grid(False)
+                values = [row[series_key] for row in rows]
+                bars = ax.bar(x_values, values, color=INK, width=0.6)
+                if bars:
+                    bars[-1].set_color(RED)
+                    _annotate_last(ax, x_values, values, "latest", RED)
+            elif config.chart_type == "heatmap":
+                categories = [c for c in rows[0].keys() if c != x_key]
+                matrix = [[int(row[cat]) for row in rows] for cat in categories]
+                ax.imshow(matrix, cmap=_completion_cmap(), aspect="auto", vmin=0, vmax=1)
+                ax.set_yticks(list(range(len(categories))))
+                ax.set_yticklabels([c.title() for c in categories])
+                ax.grid(False)
 
-        _style_axis(ax, config.title, config.ylabel, rows, kicker=config.kicker)
-        _set_date_ticks(ax, x_values, x_labels)
+            _style_axis(ax, config.title, config.ylabel, rows, kicker=config.kicker)
+            _set_date_ticks(ax, x_values, x_labels)
+        except Exception:
+            plt.close(fig)
+            logger.exception("Smart plot rendering failed; falling back to legacy parser")
+            req = parse_plot_request(text)
+            return self.generate(req) if req else self._energy_stress(30)
 
         # Generate insight
         try:
@@ -722,15 +756,7 @@ class PlotService:
 
     def _rows(self, query: str, params: tuple[str, ...]) -> list[dict[str, Any]]:
         with self.db.connect() as connection:
-            cursor = connection.execute(query, params)
-            rows = cursor.fetchall()
-            if not rows:
-                return []
-            if isinstance(rows[0], sqlite3.Row):
-                return [dict(row) for row in rows]
-
-            columns = [column[0] for column in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
+            return rows_as_dicts(connection, query, params)
 
     def _path(self, name: str) -> Path:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")
@@ -882,8 +908,3 @@ def _save(fig, path: Path) -> None:
 
 def _start_date(days: int) -> str:
     return (datetime.now(timezone.utc).date() - timedelta(days=days)).isoformat()
-
-
-def _format_error(error: Exception) -> str:
-    message = str(error).strip()
-    return message or error.__class__.__name__

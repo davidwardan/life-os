@@ -8,6 +8,7 @@ from backend.app.extraction import extract_daily_log
 from backend.app.plotting import (
     PlotRequest,
     PlotService,
+    is_safe_plot_query,
     parse_plot_request,
     parse_plot_requests,
     supported_plots,
@@ -65,6 +66,32 @@ class PlottingTests(TestCase):
             [request.metric for request in requests], ["energy", "career", "workout", "protein"]
         )
         self.assertEqual([request.days for request in requests], [30, 30, 30, 7])
+
+    def test_accepts_read_only_plot_queries(self) -> None:
+        self.assertTrue(
+            is_safe_plot_query(
+                "SELECT date, energy FROM daily_checkins WHERE date >= date('now', '-7 days')"
+            )
+        )
+        self.assertTrue(
+            is_safe_plot_query(
+                "WITH recent AS (SELECT date, energy FROM daily_checkins) SELECT * FROM recent;"
+            )
+        )
+
+    def test_rejects_unsafe_plot_queries(self) -> None:
+        unsafe = [
+            "DELETE FROM daily_checkins",
+            "DROP TABLE raw_messages",
+            "SELECT 1; DELETE FROM raw_messages",
+            "UPDATE daily_checkins SET energy = 0",
+            "INSERT INTO memory_items (value) VALUES ('x')",
+            "PRAGMA writable_schema = ON",
+            "ATTACH DATABASE '/tmp/evil.db' AS evil",
+            "",
+        ]
+        for query in unsafe:
+            self.assertFalse(is_safe_plot_query(query), query)
 
     def test_generates_energy_plot_png(self) -> None:
         with TemporaryDirectory() as directory:
