@@ -8,7 +8,7 @@ Life OS is early and intentionally local-first. Contributions should keep the co
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
-python -m unittest discover -s tests
+python -m unittest discover -s tests -t .
 python -m uvicorn backend.app.main:app --reload
 ```
 
@@ -64,7 +64,7 @@ python -m uvicorn backend.app.main:app --reload
 
 ## Pull Request Checklist
 
-- Tests pass with `python -m unittest discover -s tests`.
+- Tests pass with `python -m unittest discover -s tests -t .`.
 - No secrets are included.
 - New behavior is documented if user-facing.
 - Database changes include migration/backfill handling.

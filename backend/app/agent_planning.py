@@ -7,6 +7,8 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import BaseModel, Field, ValidationError
 
+from backend.app._llm_utils import decode_response_json as _decode_response_json
+from backend.app._llm_utils import format_error as _format_error
 from backend.app.config import settings
 
 
@@ -162,21 +164,3 @@ def _clean_plan(plan: AgentPlan, fallback_text: str) -> AgentPlan:
     if not actions:
         actions = [PlannedAction(intent="log", text=fallback_text)]
     return AgentPlan(actions=actions, duplicate_hint=plan.duplicate_hint)
-
-
-def _decode_response_json(payload: dict[str, Any]) -> dict[str, Any]:
-    for choice in payload.get("choices", []):
-        message = choice.get("message", {})
-        content = message.get("content")
-        if isinstance(content, dict):
-            return content
-        if isinstance(content, str):
-            return json.loads(content)
-    raise ValueError("Could not find structured JSON in planner response")
-
-
-def _format_error(error: Exception) -> str:
-    if isinstance(error, asyncio.TimeoutError):
-        return f"OpenRouter request exceeded {settings.llm_timeout_seconds:g}s timeout"
-    message = str(error).strip()
-    return message or error.__class__.__name__

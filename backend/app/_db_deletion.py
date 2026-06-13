@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
+
+from backend.app._db_utils import rows_as_dicts as _rows
 
 DELETABLE_LOG_KINDS = {
     "raw_messages",
@@ -247,14 +248,13 @@ def deletable_rows(
 
 
 def fetch_deletable_row(connection: Any, kind: str, record_id: int) -> dict[str, Any] | None:
-    candidates = deletable_rows(connection, kind, 100)
-    for row in candidates:
-        if row["id"] == record_id:
-            return row
     table = kind_table(kind)
     exists = _rows(connection, f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (record_id,))
     if not exists:
         return None
+    for row in deletable_rows(connection, kind, 100):
+        if row["id"] == record_id:
+            return row
     return {"kind": kind, "id": record_id, "summary": f"{kind} #{record_id}"}
 
 
@@ -314,14 +314,3 @@ def _truncate(value: str, limit: int = 96) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 1].rstrip() + "..."
-
-
-def _rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    cursor = connection.execute(query, params)
-    rows = cursor.fetchall()
-    if not rows:
-        return []
-    if isinstance(rows[0], sqlite3.Row):
-        return [dict(row) for row in rows]
-    columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]

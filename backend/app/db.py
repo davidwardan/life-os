@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -27,10 +28,13 @@ from backend.app._db_deletion import (
     kind_table,
 )
 from backend.app._db_schema import SCHEMA, run_migrations
+from backend.app._db_utils import rows_as_dicts as _rows
 from backend.app.config import DEFAULT_DB_PATH, settings
 from backend.app.schemas import MessageIn, ParsedDailyLog
 
 __all__ = ["DELETABLE_LOG_KINDS", "LifeDatabase"]
+
+logger = logging.getLogger(__name__)
 
 
 class LifeDatabase:
@@ -47,7 +51,7 @@ class LifeDatabase:
         try:
             connection.execute("PRAGMA foreign_keys = ON")
         except Exception:
-            pass
+            logger.debug("Could not enable the foreign_keys pragma", exc_info=True)
         try:
             if hasattr(connection, "sync"):
                 connection.sync()
@@ -55,6 +59,12 @@ class LifeDatabase:
             connection.commit()
             if hasattr(connection, "sync"):
                 connection.sync()
+        except BaseException:
+            try:
+                connection.rollback()
+            except Exception:
+                logger.debug("Rollback after failed transaction also failed", exc_info=True)
+            raise
         finally:
             connection.close()
 
@@ -71,7 +81,7 @@ class LifeDatabase:
                 """
                 INSERT INTO raw_messages
                 (entry_date, source, text, created_at, received_at, user_text, processed)
-                VALUES (?, ?, ?, ?, ?, ?, 0)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
                 """,
                 (log_date, message.source, message.text, now, now, message.text),
             ).lastrowid
@@ -250,8 +260,6 @@ class LifeDatabase:
                     ).lastrowid
                     records["journal"].append({"id": row_id, **item.model_dump()})
 
-            connection.execute("UPDATE raw_messages SET processed = 1 WHERE id = ?", (raw_id,))
-
         return {"raw_message_id": raw_id, "records": records}
 
     def recent_logs(self, limit: int = 25) -> dict[str, list[dict[str, Any]]]:
@@ -369,17 +377,6 @@ class LifeDatabase:
             }
 
 
-def _rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    cursor = connection.execute(query, params)
-    rows = cursor.fetchall()
-    if not rows:
-        return []
-    if isinstance(rows[0], sqlite3.Row):
-        return [dict(row) for row in rows]
-    columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]
-
-
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -390,7 +387,15 @@ def _use_turso() -> bool:
 
 def _connect(path: Path) -> Any:
     if not _use_turso():
-        return sqlite3.connect(path)
+        connection = sqlite3.connect(path)
+        try:
+            # WAL lets concurrent FastAPI worker threads read while one writes;
+            # busy_timeout retries briefly instead of failing on a locked database.
+            connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA busy_timeout = 5000")
+        except sqlite3.Error:
+            logger.debug("Could not configure WAL/busy_timeout pragmas", exc_info=True)
+        return connection
 
     try:
         import libsql

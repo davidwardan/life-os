@@ -187,7 +187,7 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
     if dinner_match:
         description = dinner_match.group(1).strip(" .")
         calories = _estimate_calories(description)
-        return [
+        entries.append(
             NutritionEntry(
                 meal_type="dinner",
                 description=description,
@@ -200,7 +200,7 @@ def _extract_nutrition(text: str) -> list[NutritionEntry]:
                     estimated=calories is not None,
                 ),
             )
-        ]
+        )
 
     if entries:
         return entries

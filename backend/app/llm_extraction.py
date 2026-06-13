@@ -9,6 +9,8 @@ from typing import Any, Protocol
 import httpx
 from pydantic import ValidationError
 
+from backend.app._llm_utils import decode_response_json as _decode_response_json
+from backend.app._llm_utils import format_error as _format_error
 from backend.app.config import settings
 from backend.app.extraction import extract_daily_log
 from backend.app.followup import build_followup_questions
@@ -353,6 +355,9 @@ def _reconcile_with_deterministic(parsed: ParsedDailyLog, text: str, target_date
                 if getattr(parsed.wellbeing, field) is None:
                     setattr(parsed.wellbeing, field, getattr(deterministic.wellbeing, field))
 
+    if deterministic.nutrition and not parsed.nutrition:
+        parsed.nutrition = deterministic.nutrition
+
     if deterministic.workout:
         if parsed.workout is None:
             parsed.workout = deterministic.workout
@@ -371,22 +376,3 @@ def _reconcile_with_deterministic(parsed: ParsedDailyLog, text: str, target_date
                 parsed.workout.exercises = deterministic.workout.exercises
 
     parsed.clarification_questions = build_followup_questions(parsed)
-
-
-def _decode_response_json(payload: dict[str, Any]) -> dict[str, Any]:
-    for choice in payload.get("choices", []):
-        message = choice.get("message", {})
-        content = message.get("content")
-        if isinstance(content, dict):
-            return content
-        if isinstance(content, str):
-            return json.loads(content)
-
-    raise ValueError("Could not find structured JSON in LLM response")
-
-
-def _format_error(error: Exception) -> str:
-    if isinstance(error, asyncio.TimeoutError):
-        return f"OpenRouter request exceeded {settings.llm_timeout_seconds:g}s timeout"
-    message = str(error).strip()
-    return message or error.__class__.__name__

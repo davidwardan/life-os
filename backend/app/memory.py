@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from backend.app.db import LifeDatabase
+from backend.app._db_utils import rows_as_dicts as _rows
 from backend.app.schemas import ParsedDailyLog
 
 
@@ -384,7 +384,9 @@ def _clean_sentence(sentence: str) -> str:
 
 
 def _normalize_value(value: str) -> str:
-    value = re.split(r"\b(?:because|but only if|unless)\b", value, maxsplit=1, flags=re.I)[0]
+    # Drop the rationale ("... because ...") but keep conditional clauses
+    # ("but only if ...", "unless ...") — they change the preference's meaning.
+    value = re.split(r"\bbecause\b", value, maxsplit=1, flags=re.I)[0]
     value = re.sub(r"^(that|to|be)\s+", "", value.strip(), flags=re.I)
     return value.strip(" .,:;-").lower()
 
@@ -434,18 +436,6 @@ def _public_memory(row: dict[str, Any]) -> dict[str, Any]:
         "importance": row["importance"],
         "times_seen": row["times_seen"],
     }
-
-
-def _rows(connection: Any, query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
-    cursor = connection.execute(query, params)
-    rows = cursor.fetchall()
-    if not rows:
-        return []
-    if isinstance(rows[0], sqlite3.Row):
-        return [dict(row) for row in rows]
-
-    columns = [column[0] for column in cursor.description]
-    return [dict(zip(columns, row)) for row in rows]
 
 
 def _now() -> str:
