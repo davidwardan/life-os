@@ -164,5 +164,3 @@ def _clean_plan(plan: AgentPlan, fallback_text: str) -> AgentPlan:
     if not actions:
         actions = [PlannedAction(intent="log", text=fallback_text)]
     return AgentPlan(actions=actions, duplicate_hint=plan.duplicate_hint)
-
-
